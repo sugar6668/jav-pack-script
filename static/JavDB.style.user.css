@@ -301,30 +301,61 @@ body:has(.x-load) #footer,
     position: relative;
     transition: border 0.2s;
 
-    &:has(.x-match:not(.is-normal)) {
+    /* 限制旧版单色边框仅在非多色匹配下生效 */
+    &:has(.x-match:not(.is-normal)):not(.x-multi-matched) {
       border-style: solid;
       border-width: 0.375rem;
       border-radius: calc(0.375rem - 1px);
     }
 
-    &:has(.x-match.is-success) {
+    &:has(.x-match.is-success):not(.x-multi-matched) {
       background-color: var(--x-success-bd);
       border-color: var(--x-success-bd);
     }
 
-    &:has(.x-match.is-info) {
+    &:has(.x-match.is-info):not(.x-multi-matched) {
       background-color: var(--x-info-bd);
       border-color: var(--x-info-bd);
     }
 
-    &:has(.x-match.is-warning) {
+    &:has(.x-match.is-warning):not(.x-multi-matched) {
       background-color: var(--x-warning-bd);
       border-color: var(--x-warning-bd);
     }
 
-    &:has(.x-match.is-danger) {
+    &:has(.x-match.is-danger):not(.x-multi-matched) {
       background-color: var(--x-danger-bd);
       border-color: var(--x-danger-bd);
+    }
+
+    /* 新增：多色渐变边框支持 */
+    &.x-multi-matched {
+      border: none !important;
+      box-shadow: none !important;
+
+      .cover {
+        position: relative;
+        border-radius: 6px; 
+
+        &::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          padding: 4px;
+          background: var(--multi-match-bg, var(--x-success)) !important;
+          border-radius: inherit;
+          -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+          -webkit-mask-composite: xor;
+          mask-composite: exclude;
+          pointer-events: none;
+          z-index: 10;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+      }
+
+      &:hover .cover::after {
+        filter: brightness(1.15);
+      }
     }
 
     .cover {
@@ -370,6 +401,16 @@ body:has(.x-load) #footer,
         height: 2em;
         padding: 0 0.75em;
         border: none;
+      }
+
+      /* 右上角演员离线徽章修复 */
+      .is-actor-offline {
+        position: absolute;
+        top: 6px;
+        right: 6px;
+        z-index: 10;
+        opacity: 0.9;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
       }
 
       &:hover img {
@@ -806,6 +847,12 @@ br + .title {
     align-items: normal;
     padding: 0.5rem 0;
 
+    /* 兼容匹配与离线面板 */
+    &.x-match-block, &.x-offline-actions, &.x-merge-wrap {
+      display: block !important;
+      padding-top: 10px !important;
+    }
+
     .copy-to-clipboard {
       width: 1.25rem;
       height: 1.25rem;
@@ -821,6 +868,56 @@ br + .title {
       white-space: unset;
       -webkit-box-orient: vertical;
     }
+  }
+
+  /* 离线操作与合并面板按钮修复 */
+  .x-offline-actions .buttons, .x-merge-wrap .buttons {
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .x-offline-actions .button, .x-merge-wrap .button {
+    margin: 0 !important;
+  }
+
+  .x-match-cont, .x-match-list {
+    width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  /* 匹配项列表UI修复 */
+  .zymatch-item {
+    display: flex;
+    flex-wrap: wrap;
+    width: 100%;
+    padding: 6px 0;
+    border-bottom: 1px dashed #e8e8e8;
+    align-items: flex-start;
+    gap: 6px;
+
+    .buttons {
+      flex-basis: 100%;
+      margin: 0;
+      padding-left: 2px;
+      display: flex;
+      gap: 4px;
+    }
+
+    button, a {
+      pointer-events: auto !important;
+    }
+  }
+
+  .x-match.button {
+    flex-basis: 100%;
+    text-align: left;
+    padding: 4px 8px;
+    justify-content: flex-start;
+    white-space: normal;
+    height: auto;
   }
 
   & > div.panel-block:first-child {
@@ -1021,36 +1118,4 @@ br + .title {
     object-fit: contain;
     background-color: #aa9084;
   }
-}
-/* ==========================================
-   多资源分层渐变边框注入模块
-   ========================================== */
-
-/* 1. 清除原有的匹配边框，避免冲突 */
-.movie-list .item.x-multi-matched .video-cover,
-.movie-list .item.x-multi-matched .box {
-    border: none !important; 
-    position: relative;
-}
-
-/* 2. 利用伪元素绘制动态的多色分层描边 */
-.movie-list .item.x-multi-matched .video-cover::after {
-    content: "";
-    position: absolute;
-    inset: 0; /* 铺满整个封面 */
-    pointer-events: none; /* 防止遮挡鼠标点击 */
-    padding: 4px; /* 这里控制描边框的厚度，可以自行改成 3px 或 5px */
-    background: var(--multi-match-bg); /* 接收 JS 传过来的动态颜色 */
-    border-radius: 6px; /* 匹配 JavDB 原生的圆角 */
-    
-    /* 使用 mask 镂空中间区域，只保留 padding 区域的边框 */
-    -webkit-mask: 
-        linear-gradient(#fff 0 0) content-box, 
-        linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    
-    /* 增加一个小阴影让层级感更好 */
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-    z-index: 10;
 }
