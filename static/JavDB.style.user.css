@@ -1119,3 +1119,24 @@ br + .title {
     background-color: #aa9084;
   }
 }
+/* ==========================================
+   追加到底部：多资源拼接边框 (实心原色，无半透明，按数量分割)
+   ========================================== */
+.movie-list .item.x-multi-matched {
+  /* 清除原版发虚的背景色和边框色 */
+  background-color: transparent !important;
+  border-color: transparent !important;
+  position: relative;
+  z-index: 1; 
+}
+
+.movie-list .item.x-multi-matched::before {
+  content: "";
+  position: absolute;
+  /* -0.375rem 刚好等同于原版边框的厚度，完美扩张出去 */
+  inset: -0.375rem; 
+  background: var(--multi-match-bg) !important;
+  border-radius: calc(0.375rem - 1px);
+  /* 核心：把这个鲜艳的多色背景垫在 .box 后面，中间会被白色/黑色的影片盒子盖住，四周只露出实心的纯色边框 */
+  z-index: -1; 
+}
