@@ -1022,3 +1022,35 @@ br + .title {
     background-color: #aa9084;
   }
 }
+/* ==========================================
+   多资源分层渐变边框注入模块
+   ========================================== */
+
+/* 1. 清除原有的匹配边框，避免冲突 */
+.movie-list .item.x-multi-matched .video-cover,
+.movie-list .item.x-multi-matched .box {
+    border: none !important; 
+    position: relative;
+}
+
+/* 2. 利用伪元素绘制动态的多色分层描边 */
+.movie-list .item.x-multi-matched .video-cover::after {
+    content: "";
+    position: absolute;
+    inset: 0; /* 铺满整个封面 */
+    pointer-events: none; /* 防止遮挡鼠标点击 */
+    padding: 4px; /* 这里控制描边框的厚度，可以自行改成 3px 或 5px */
+    background: var(--multi-match-bg); /* 接收 JS 传过来的动态颜色 */
+    border-radius: 6px; /* 匹配 JavDB 原生的圆角 */
+    
+    /* 使用 mask 镂空中间区域，只保留 padding 区域的边框 */
+    -webkit-mask: 
+        linear-gradient(#fff 0 0) content-box, 
+        linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    
+    /* 增加一个小阴影让层级感更好 */
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    z-index: 10;
+}
