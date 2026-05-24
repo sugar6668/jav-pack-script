@@ -6,7 +6,7 @@ class Offline {
 
   static defaultColor = "is-info";
 
-  static defaultRename = `\${zh}\${crack} \${code} \${title}`;
+  static defaultRename = `\${code} \${zh}\${crack} \${title}`;
 
   static defaultOptions = {
     tags: ["genres", "actors"],
@@ -31,7 +31,7 @@ class Offline {
   static defaultRenameTxt = {
     no: `.\${no}`,
     sep: "-",
-    zh: "[中字]",
+    zh: "[中文]",
     crack: "[破解]",
   };
 
