@@ -169,7 +169,10 @@ class Drive115 extends Req {
 class Req115 extends Drive115 {
   static async filesAll(cid, params = {}) {
     const res = await this.files(cid, params);
-    const { count, page_size, data } = res;
+    // 🛡️ 防御补丁：如果 res 是空的，直接返回空数据格式
+    if (!res) return { data: [] };
+    // 🛡️ 防御补丁：给予默认值，防止解构报错
+    const { count = 0, page_size = 0, data = [] } = res;
     return count > page_size && data.length ? this.files(cid, { ...params, limit: count }) : res;
   }
 
@@ -183,7 +186,10 @@ class Req115 extends Drive115 {
 
   static async filesSearchAll(search_value, params = {}) {
     const res = await this.filesSearch(search_value, params);
-    const { count, page_size, data } = res;
+    // 🛡️ 防御补丁：如果 res 是空的，直接返回空数据格式
+    if (!res) return { data: [] };
+    // 🛡️ 防御补丁：给予默认值，防止解构报错
+    const { count = 0, page_size = 0, data = [] } = res;
     return count > page_size && data.length ? this.filesSearch(search_value, { ...params, limit: count }) : res;
   }
 
