@@ -1470,20 +1470,8 @@ br + .title {
   min-width: 70px;
   height: 2em;
   padding: 0 0.75em;
-  font-size: var(--x-size-sm);
-  font-weight: 600;
-  color: #fff;
-  background-color: rgb(0 0 0 / 65%);
   border: none;
   border-radius: 1px;
-  box-shadow: 0 2px 4px rgb(0 0 0 / 30%);
-  opacity: 0.92;
-}
-
-.movie-list .item .cover .x-qv-button:hover {
-  color: #fff;
-  background-color: rgb(0 0 0 / 82%);
-  opacity: 1;
 }
 
 .x-qv-overlay {
@@ -1498,26 +1486,23 @@ br + .title {
 
 .x-qv-loading {
   position: absolute;
-  z-index: 1;
+  z-index: 3;
   font-size: 1rem;
   font-weight: 600;
   color: #fff;
+  pointer-events: none;
+  text-shadow: 0 2px 8px rgb(0 0 0 / 70%);
 }
 
 .x-qv-modal {
   position: relative;
   z-index: 2;
-  width: min(92vw, 1400px);
-  height: 90vh;
+  width: min(98vw, 1680px);
+  height: 96vh;
   overflow: hidden;
   background: #fff;
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: 0 16px 48px rgb(0 0 0 / 60%);
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.x-qv-modal.is-ready {
   opacity: 1;
 }
 
@@ -1526,19 +1511,34 @@ br + .title {
   top: 0.75rem;
   right: 0.75rem;
   z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 2rem;
   height: 2rem;
   padding: 0;
-  font-size: 1.5rem;
-  line-height: 1;
-  color: #fff;
   cursor: pointer;
   background: rgb(0 0 0 / 62%);
   border: none;
   border-radius: 50%;
+}
+
+.x-qv-close::before,
+.x-qv-close::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1rem;
+  height: 2px;
+  content: "";
+  background: #fff;
+  border-radius: 1px;
+  transform-origin: center;
+}
+
+.x-qv-close::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.x-qv-close::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
 }
 
 .x-qv-close:hover {

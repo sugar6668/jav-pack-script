@@ -16,7 +16,7 @@ window.JavPackQuickView = class JavPackQuickView {
 
       const btn = doc.createElement("button");
       btn.type = "button";
-      btn.className = "button is-small x-qv-button";
+      btn.className = "button is-small x-un-hover is-info x-qv-button";
       btn.textContent = "小窗预览";
       btn.title = "小窗预览";
       btn.onclick = (event) => {
@@ -45,16 +45,17 @@ window.JavPackQuickView = class JavPackQuickView {
     loading.textContent = "正在加载详情页...";
 
     const modal = document.createElement("div");
-    modal.className = "x-qv-modal";
+    modal.className = "x-qv-modal is-ready";
 
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "x-qv-close";
     closeBtn.setAttribute("aria-label", "close");
-    closeBtn.textContent = "×";
+    closeBtn.title = "关闭";
 
     const iframe = document.createElement("iframe");
     iframe.className = "x-qv-iframe";
+    iframe.loading = "eager";
     iframe.src = url;
 
     const closeModal = () => {
@@ -71,7 +72,6 @@ window.JavPackQuickView = class JavPackQuickView {
     iframe.addEventListener("load", () => {
       this.injectIframeStyle(iframe);
       loading.remove();
-      modal.classList.add("is-ready");
     });
 
     modal.append(closeBtn, iframe);
