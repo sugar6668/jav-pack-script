@@ -108,9 +108,9 @@ const formatDirectory = (item) => {
 
 const formatTip = (item) => `${item.n} - ${item.s} / ${formatDirectory(item)}`;
 
-const enrichDirectories = async (sources) => {
-  if (!window.JavPackMatch115Console?.enrichDirectories) return sources;
-  return window.JavPackMatch115Console.enrichDirectories(sources, Req115);
+const enrichMetadata = async (sources) => {
+  if (!window.JavPackMatch115Console?.enrichMetadata) return sources;
+  return window.JavPackMatch115Console.enrichMetadata(sources, Req115);
 };
 
 const getPageDetails = (dom = document) => {
@@ -160,7 +160,7 @@ const getPageDetails = (dom = document) => {
       const { data = [] } = await Req115.filesSearchAllVideos(codes.join(" "));
       if (load.dataset.uid !== UUID) return;
 
-      const sources = await enrichDirectories(extractData(data.filter((it) => regex.test(it.n))));
+      const sources = await enrichMetadata(extractData(data.filter((it) => regex.test(it.n))));
       cont.innerHTML = sources.map((item) => render(item, codeDetails)).join("") || "暂无匹配";
       GM_setValue(code, sources);
     } catch (err) {
@@ -335,7 +335,8 @@ const getPageDetails = (dom = document) => {
 
       try {
         const { data = [] } = await Req115.filesSearchAllVideos(prefix);
-        const sources = await enrichDirectories(extractData(data));
+        const matchedData = data.filter((item) => pendingItems.some(({ regex }) => regex.test(item.n)));
+        const sources = await enrichMetadata(extractData(matchedData));
         GM_setValue(prefix, sources);
         over(prefix, sources);
       } catch (err) {
@@ -401,7 +402,7 @@ const getPageDetails = (dom = document) => {
       const { data = [] } = await Req115.filesSearchAllVideos(codes.join(" "));
       if (target.dataset.uid !== UUID) return;
 
-      const sources = await enrichDirectories(extractData(data.filter((it) => regex.test(it.n))));
+      const sources = await enrichMetadata(extractData(data.filter((it) => regex.test(it.n))));
       GM_setValue(code, sources);
     } catch (err) {
       if (target.dataset.uid !== UUID) return;

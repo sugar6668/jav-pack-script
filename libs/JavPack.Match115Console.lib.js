@@ -43,26 +43,41 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       .join("/");
   }
 
-  static async resolveDirectory(req115, cid) {
-    if (!req115 || !cid) return "";
-    const res = await req115.files(cid);
-    return this.formatPathParts(res?.path || []);
+  static hasCoverFile(files = []) {
+    return files.some((file) => /cover/i.test(file?.n || "") && /\.(jpe?g|png|webp|gif)$/i.test(file?.n || ""));
   }
 
-  static async enrichDirectories(items = [], req115) {
-    const pathCache = new Map();
+  static getCoverFilename(details = {}) {
+    const code = this.sanitizeName(details.code || "cover") || "cover";
+    return `${code}.cover.jpg`;
+  }
+
+  static async resolveMetadata(req115, cid) {
+    if (!req115 || !cid) return "";
+    const res = await req115.files(cid, { limit: 1150 });
+    return {
+      realPath: this.formatPathParts(res?.path || []),
+      hasCover: this.hasCoverFile(res?.data || []),
+    };
+  }
+
+  static async enrichMetadata(items = [], req115) {
+    const cids = [...new Set(items.filter((item) => item?.cid && (!item.realPath || !item.paths?.length || item.hasCover === undefined)).map((item) => item.cid))];
+    const entries = await Promise.all(cids.map(async (cid) => [cid, await this.resolveMetadata(req115, cid).catch(() => ({ realPath: "", hasCover: false }))]));
+    const metadata = new Map(entries);
 
     for (const item of items) {
-      if (!item?.cid || item.realPath || item.paths?.length) continue;
-      if (!pathCache.has(item.cid)) {
-        pathCache.set(item.cid, await this.resolveDirectory(req115, item.cid));
-      }
-
-      const realPath = pathCache.get(item.cid);
-      if (realPath) item.realPath = realPath;
+      const meta = metadata.get(item.cid);
+      if (!meta) continue;
+      if (meta.realPath && !item.realPath) item.realPath = meta.realPath;
+      if (item.hasCover === undefined) item.hasCover = meta.hasCover;
     }
 
     return items;
+  }
+
+  static enrichDirectories(items = [], req115) {
+    return this.enrichMetadata(items, req115);
   }
 
   static buildTargetDir(details = {}) {
@@ -86,6 +101,9 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     const safePath = this.escapeHtml(path);
     const safeTip = this.escapeHtml(tip);
     const safeDir = this.escapeHtml(targetDir);
+    const coverClass = file.hasCover ? "is-success" : "is-info";
+    const coverText = file.hasCover ? "已有封面" : "传封面";
+    const coverDisabled = file.hasCover ? " disabled" : "";
 
     return `
       <div class="zymatch-item" data-fid="${this.escapeHtml(file.fid || "")}" data-cid="${this.escapeHtml(file.cid || "")}">
@@ -102,6 +120,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         <div class="buttons">
           <button class="button is-small is-primary x-match-action" data-action="archive" data-dir="${safeDir}" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">刮削归档</button>
           <button class="button is-small is-link x-match-action" data-action="rename" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">重命名</button>
+          <button class="button is-small ${coverClass} x-match-action x-match-cover" data-action="cover" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}"${coverDisabled}>${coverText}</button>
           <button class="button is-small is-danger is-light x-match-action" data-action="delv" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}">删除文件</button>
           <button class="button is-small is-danger x-match-action" data-action="delf" data-cid="${this.escapeHtml(file.cid || "")}">删除文件夹</button>
         </div>
@@ -130,17 +149,18 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       crack: false,
     });
 
-    if (details.cover) {
-      try {
-        const coverRes = await req115.handleCover(details.cover, targetCid, `${details.code || "cover"}.cover.jpg`);
-        const fileId = coverRes?.data?.file_id || coverRes?.data?.fileid;
-        if (fileId) await req115.filesEdit(targetCid, fileId);
-      } catch (err) {
-        console.warn("[JavPackMatch115Console.handleCover]", err?.message);
-      }
-    }
+    if (details.cover) await this.uploadCover({ req115, cid: targetCid, details }).catch((err) => console.warn("[JavPackMatch115Console.handleCover]", err?.message));
 
     return targetCid;
+  }
+
+  static async uploadCover({ req115, cid, details }) {
+    if (!details.cover) throw new Error("未找到可用封面");
+    const coverRes = await req115.handleCover(details.cover, cid, this.getCoverFilename(details));
+    const fileId = coverRes?.data?.file_id || coverRes?.data?.fileid || coverRes?.file_id || coverRes?.fileid;
+    if (!fileId) throw new Error("封面上传失败");
+    await req115.filesEdit(cid, fileId);
+    return fileId;
   }
 
   static async renameMatched({ req115, item, details }) {
@@ -187,11 +207,29 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         if (action === "archive") {
           const newCid = await this.archiveMatched({ req115, item, details, dir: btn.dataset.dir?.split("/") });
           item.cid = newCid;
-          btn.closest(".zymatch-item")?.querySelectorAll("[data-cid]").forEach((node) => {
+          const itemDom = btn.closest(".zymatch-item");
+          itemDom?.querySelectorAll("[data-cid]").forEach((node) => {
             node.dataset.cid = String(newCid);
           });
+          const dirNode = itemDom?.querySelector(".x-match-dir");
+          if (dirNode && btn.dataset.dir) dirNode.textContent = btn.dataset.dir;
+          const coverBtn = itemDom?.querySelector('.x-match-cover');
+          if (coverBtn && details.cover) {
+            coverBtn.classList.remove("is-info");
+            coverBtn.classList.add("is-success");
+            coverBtn.textContent = "已有封面";
+            coverBtn.setAttribute("disabled", "");
+          }
         } else if (action === "rename") {
           await this.renameMatched({ req115, item, details });
+          const nameNode = btn.closest(".zymatch-item")?.querySelector(".x-match-name");
+          if (nameNode) nameNode.textContent = this.buildRename(details, [item]);
+        } else if (action === "cover") {
+          await this.uploadCover({ req115, cid: item.cid, details });
+          btn.classList.remove("is-info");
+          btn.classList.add("is-success");
+          btn.textContent = "已有封面";
+          btn.setAttribute("disabled", "");
         } else if (action === "delv" || action === "delf") {
           await this.deleteMatched({ req115, item, action });
           options.removeFromCache?.(item, action);
@@ -199,9 +237,8 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         }
 
         grant?.notify?.({ status: "success", icon: "success", msg: "操作成功" });
-        btn.textContent = action === "archive" ? "已归档" : action === "rename" ? "已重命名" : "已删除";
+        if (action !== "cover") btn.textContent = action === "archive" ? "已归档" : action === "rename" ? "已重命名" : "已删除";
         btn.setAttribute("disabled", "");
-        if (action !== "delv" && action !== "delf") options.refresh?.();
       } catch (err) {
         grant?.notify?.({ status: "error", icon: "error", msg: err?.message || "操作失败" });
         btn.textContent = oldText;
