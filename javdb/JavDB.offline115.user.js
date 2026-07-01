@@ -24,6 +24,7 @@
 // @connect         javdb.com
 // @connect         115.com
 // @connect         api-shoulei-ssl.xunlei.com
+// @connect         *
 // @run-at          document-end
 // @grant           GM_removeValueChangeListener
 // @grant           GM_addValueChangeListener

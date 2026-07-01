@@ -26,14 +26,22 @@ window.JavPackSubtitle = class JavPackSubtitle {
   }
 
   static buildDefaultKeyword(details = {}) {
-    return this.sanitizeName([details.code, details.title].filter(Boolean).join(" ")) || document.title;
+    return this.sanitizeName(details.code || "") || this.sanitizeName([details.code, details.title].filter(Boolean).join(" ")) || document.title;
+  }
+
+  static buildSearchKeywords(details = {}) {
+    return [
+      this.sanitizeName(details.code || ""),
+      this.sanitizeName([details.code, details.title].filter(Boolean).join(" ")),
+      this.sanitizeName(details.title || ""),
+    ].filter((item, index, list) => item && list.indexOf(item) === index);
   }
 
   static buildSubtitleBaseName(details = {}) {
     if (window.JavPackMatch115Console?.buildRename) {
       return window.JavPackMatch115Console.buildRename(details, [{ n: `${details.code || "subtitle"}.mp4` }]);
     }
-    return this.buildDefaultKeyword(details);
+    return this.sanitizeName([details.code, details.title].filter(Boolean).join(" ")) || this.buildDefaultKeyword(details);
   }
 
   static buildSubtitleFilename(details = {}, item = {}) {
@@ -95,6 +103,7 @@ window.JavPackSubtitle = class JavPackSubtitle {
   }
 
   static modalTemplate(defaultKw) {
+    const candidates = this.buildSearchKeywords(this.currentDetails || {});
     return `
       <div class="pdb-sub-modal">
         <div class="pdb-sub-header">
@@ -102,6 +111,9 @@ window.JavPackSubtitle = class JavPackSubtitle {
             <span class="pdb-sub-title">迅雷字幕检索:</span>
             <input type="text" id="sub-search-input" value="${this.escapeHtml(defaultKw)}" class="pdb-sub-input" placeholder="输入检索词..." />
             <button id="sub-search-btn" class="pdb-sub-btn">重新搜索</button>
+            <div class="pdb-sub-keywords">
+              ${candidates.map((keyword) => `<button type="button" class="pdb-sub-keyword" data-keyword="${this.escapeHtml(keyword)}">${this.escapeHtml(keyword)}</button>`).join("")}
+            </div>
           </div>
           <span class="pdb-sub-close" id="sub-close-btn">&times;</span>
         </div>
@@ -120,6 +132,7 @@ window.JavPackSubtitle = class JavPackSubtitle {
 
   static openSearchModal({ details = {}, getTargetCid } = {}) {
     const defaultKw = this.buildDefaultKeyword(details);
+    this.currentDetails = details;
     document.getElementById(this.MODAL_ID)?.remove();
 
     const overlay = document.createElement("div");
@@ -160,7 +173,7 @@ window.JavPackSubtitle = class JavPackSubtitle {
               contentWrap.innerHTML = '<div class="pdb-sub-msg">未找到相关字幕，请尝试删减搜索词</div>';
               return;
             }
-            this.renderTable({ container: contentWrap, dataList: this.sortResults(root.data, kw), previewBox, statusNode, overlay, details, getTargetCid, kw });
+            this.renderTable({ container: contentWrap, dataList: this.sortResults(root.data, kw, details), previewBox, statusNode, overlay, details, getTargetCid, kw });
           } catch (err) {
             contentWrap.innerHTML = '<div class="pdb-sub-msg pdb-sub-error">API 数据解析失败</div>';
           }
@@ -172,27 +185,36 @@ window.JavPackSubtitle = class JavPackSubtitle {
     };
 
     overlay.querySelector("#sub-search-btn").addEventListener("click", () => performSearch(input.value.trim()));
+    overlay.querySelectorAll(".pdb-sub-keyword").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        input.value = btn.dataset.keyword;
+        performSearch(input.value.trim());
+      });
+    });
     input.addEventListener("keypress", (e) => {
       if (e.key === "Enter") performSearch(input.value.trim());
     });
     performSearch(defaultKw);
   }
 
-  static sortResults(dataList, kw = "") {
+  static sortResults(dataList, kw = "", details = {}) {
     const kwClean = kw.toLowerCase().replace(/[-_.\s]/g, "");
     const tokens = kw.toLowerCase().split(/[-_.\s]+/).filter((word) => word.length > 1);
-    return [...dataList].sort((a, b) => this.scoreResult(b, kwClean, tokens) - this.scoreResult(a, kwClean, tokens));
+    const codeClean = String(details.code || kw).toLowerCase().replace(/[-_.\s]/g, "");
+    return [...dataList].sort((a, b) => this.scoreResult(b, kwClean, tokens, codeClean) - this.scoreResult(a, kwClean, tokens, codeClean));
   }
 
-  static scoreResult(item, kwClean, tokens) {
+  static scoreResult(item, kwClean, tokens, codeClean = "") {
     const name = (item.name || item.extra_name || "").toLowerCase();
+    const compactName = name.replace(/[-_.\s]/g, "");
     const lang = ((item.languages && item.languages[0]) || "").toLowerCase();
     let score = 0;
+    if (codeClean && compactName.includes(codeClean)) score += 800;
     tokens.forEach((token) => {
       if (name.includes(token)) score += 50;
     });
-    if (kwClean && name.replace(/[-_.\s]/g, "").includes(kwClean)) score += 500;
-    if (/zh|cn|chs|cht|中字|简|繁/.test(lang) || /中字|简|繁|chs|cht/.test(name)) score += 100;
+    if (kwClean && compactName.includes(kwClean)) score += 500;
+    if (/(zh|cn|chs|cht|chinese)/i.test(lang) || /(zh|cn|chs|cht|chinese)/i.test(name)) score += 100;
     if (item.ext === "srt" || item.ext === "ass") score += 20;
     return score;
   }
