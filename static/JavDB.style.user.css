@@ -1497,7 +1497,7 @@ br + .title {
 .x-qv-modal {
   position: relative;
   z-index: 2;
-  width: 98vw;
+  width: min(98vw, 1920px);
   height: 96vh;
   overflow: hidden;
   background: #fff;
