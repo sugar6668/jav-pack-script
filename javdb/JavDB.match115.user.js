@@ -10,8 +10,11 @@
 // @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Magnet.lib.js
 // @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Req.lib.js
 // @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Req115.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Match115Console.lib.js
 // @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Util.lib.js
 // @connect         115.com
+// @connect         aliyuncs.com
+// @connect         jdbstatic.com
 // @run-at          document-end
 // @grant           GM_xmlhttpRequest
 // @grant           GM_deleteValues
@@ -90,17 +93,47 @@ const formatBytes = (bytes, k = 1024) => {
   return `${size}${units[i]}`;
 };
 
-const extractData = (data, keys = ["pc", "cid", "n", "s", "t"], format = "s") => {
-  return data.map((item) => ({ ...JSON.parse(JSON.stringify(item, keys)), [format]: formatBytes(item[format]) }));
+const extractData = (data, format = "s") => {
+  const keys = ["pc", "cid", "fid", "n", "s", "t", "ico", "paths", "realPath", "name", "file_name"];
+  return data.map((item) => {
+    const source = JSON.parse(JSON.stringify(item, keys));
+    return { ...source, [format]: formatBytes(item[format]) };
+  });
 };
 
-const formatTip = ({ n, s, t }) => `${n} - ${s} / ${t}`;
+const formatDirectory = (item) => {
+  if (window.JavPackMatch115Console) return window.JavPackMatch115Console.formatDirectory(item);
+  return item.t || item.pc || "";
+};
+
+const formatTip = (item) => `${item.n} - ${item.s} / ${formatDirectory(item)}`;
+
+const getPageDetails = (dom = document) => {
+  const infoNode = dom.querySelector(".movie-panel-info");
+  const code = infoNode?.querySelector(".first-block .value")?.textContent.trim();
+  if (!code) return;
+
+  const titleNode = dom.querySelector(".title.is-4");
+  const label = titleNode?.querySelector("strong")?.textContent.trim() || "";
+  const currentTitle = titleNode?.querySelector(".origin-title, .current-title")?.textContent.trim() || "";
+  const title = `${label}${currentTitle}`.replace(code, "").trim();
+
+  return {
+    ...Util.codeParse(code),
+    title,
+    cover: dom.querySelector(".video-cover")?.src || "",
+  };
+};
 
 (function () {
   const CONT = document.querySelector(".movie-panel-info");
   if (!CONT) return;
 
-  const render = ({ pc, cid, ...data }) => {
+  const render = ({ pc, cid, ...data }, details) => {
+    if (window.JavPackMatch115Console) {
+      return window.JavPackMatch115Console.renderItem({ pc, cid, ...data }, details);
+    }
+
     return `
     <a
       href="${VOID}"
@@ -123,7 +156,7 @@ const formatTip = ({ n, s, t }) => `${n} - ${s} / ${t}`;
       if (load.dataset.uid !== UUID) return;
 
       const sources = extractData(data.filter((it) => regex.test(it.n)));
-      cont.innerHTML = sources.map(render).join("") || "暂无匹配";
+      cont.innerHTML = sources.map((item) => render(item, codeDetails)).join("") || "暂无匹配";
       GM_setValue(code, sources);
     } catch (err) {
       if (load.dataset.uid !== UUID) return;
@@ -153,7 +186,7 @@ const formatTip = ({ n, s, t }) => `${n} - ${s} / ${t}`;
   };
 
   const code = CONT.querySelector(".first-block .value").textContent.trim();
-  const codeDetails = Util.codeParse(code);
+  const codeDetails = getPageDetails() || Util.codeParse(code);
   const block = addBlock();
   const matcher = () => matchCode(codeDetails, block);
 
@@ -168,6 +201,21 @@ const formatTip = ({ n, s, t }) => `${n} - ${s} / ${t}`;
   };
 
   block.load.addEventListener("click", refresh);
+  window.JavPackMatch115Console?.bindActions(block.cont, {
+    req115: Req115,
+    grant: Grant,
+    details: codeDetails,
+    removeFromCache: (item, action) => {
+      const cache = GM_getValue(code) || [];
+      const next = cache.filter((file) => {
+        if (action === "delv") return String(file.fid) !== String(item.fid);
+        if (action === "delf") return String(file.cid) !== String(item.cid);
+        return true;
+      });
+      GM_setValue(code, next);
+    },
+    refresh: matcher,
+  });
   window.addEventListener("beforeunload", () => CHANNEL.postMessage(code));
 })();
 

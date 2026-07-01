@@ -957,6 +957,30 @@ br + .title {
     button, a {
       pointer-events: auto !important;
     }
+
+    .x-match-name,
+    .x-match-dir {
+      display: block;
+      width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .x-match-name {
+      font-weight: 600;
+    }
+
+    .x-match-dir {
+      margin-top: 0.125rem;
+      font-size: var(--x-size-sm);
+      font-weight: 400;
+      color: #6c757d;
+    }
+
+    .x-match-action {
+      border-radius: 1px;
+    }
   }
 
   .x-match.button {
