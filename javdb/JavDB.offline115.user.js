@@ -7,21 +7,23 @@
 // @match           https://javdb.com/*
 // @match           https://captchaapi.115.com/*
 // @icon            https://javdb.com/favicon.ico
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Grant.lib.js
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Magnet.lib.js
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Offline.lib.js
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Req.lib.js
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Req115.lib.js
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Util.lib.js
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Verify115.lib.js
-// @resource        pend https://github.com/bolin-dev/JavPack/raw/main/assets/pend.png
-// @resource        warn https://github.com/bolin-dev/JavPack/raw/main/assets/warn.png
-// @resource        error https://github.com/bolin-dev/JavPack/raw/main/assets/error.png
-// @resource        success https://github.com/bolin-dev/JavPack/raw/main/assets/success.png
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Grant.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Magnet.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Offline.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Req.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Req115.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Subtitle.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Util.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Verify115.lib.js
+// @resource        pend https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/assets/pend.png
+// @resource        warn https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/assets/warn.png
+// @resource        error https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/assets/error.png
+// @resource        success https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/assets/success.png
 // @connect         jdbstatic.com
 // @connect         aliyuncs.com
 // @connect         javdb.com
 // @connect         115.com
+// @connect         api-shoulei-ssl.xunlei.com
 // @run-at          document-end
 // @grant           GM_removeValueChangeListener
 // @grant           GM_addValueChangeListener
@@ -366,6 +368,10 @@ const offline = async ({ options, magnets, onstart, onprogress, onfinally }, cur
   };
 
   insertActions(actions);
+  window.JavPackSubtitle?.ensureDetailButton({
+    details,
+    getTargetCid: () => document.querySelector(".x-match-cont .zymatch-item [data-cid]")?.dataset.cid || "",
+  });
   document.addEventListener("click", onclick);
 })();
 
