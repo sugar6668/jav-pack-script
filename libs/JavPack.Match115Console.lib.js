@@ -29,14 +29,40 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     if (item.realPath) return String(item.realPath);
 
     if (Array.isArray(item.paths)) {
-      const path = item.paths
-        .map((part) => part?.name || part?.file_name || part?.n)
-        .filter((name) => name && name !== "网盘" && name !== "115")
-        .join("/");
+      const path = this.formatPathParts(item.paths);
       if (path) return path;
     }
 
     return item.t || item.pc || "目录未知";
+  }
+
+  static formatPathParts(parts = []) {
+    return parts
+      .map((part) => part?.name || part?.file_name || part?.n)
+      .filter((name) => name && name !== "网盘" && name !== "115")
+      .join("/");
+  }
+
+  static async resolveDirectory(req115, cid) {
+    if (!req115 || !cid) return "";
+    const res = await req115.files(cid);
+    return this.formatPathParts(res?.path || []);
+  }
+
+  static async enrichDirectories(items = [], req115) {
+    const pathCache = new Map();
+
+    for (const item of items) {
+      if (!item?.cid || item.realPath || item.paths?.length) continue;
+      if (!pathCache.has(item.cid)) {
+        pathCache.set(item.cid, await this.resolveDirectory(req115, item.cid));
+      }
+
+      const realPath = pathCache.get(item.cid);
+      if (realPath) item.realPath = realPath;
+    }
+
+    return items;
   }
 
   static buildTargetDir(details = {}) {
