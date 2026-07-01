@@ -351,30 +351,6 @@ body:has(.x-load) #footer,
     &.x-multi-matched {
       border: none !important;
       box-shadow: none !important;
-
-      .cover {
-        position: relative;
-        border-radius: 6px; 
-
-        &::after {
-          content: "";
-          position: absolute;
-          inset: 0;
-          padding: 4px;
-          background: var(--multi-match-bg, var(--x-success)) !important;
-          border-radius: inherit;
-          -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-          -webkit-mask-composite: xor;
-          mask-composite: exclude;
-          pointer-events: none;
-          z-index: 10;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-        }
-      }
-
-      &:hover .cover::after {
-        filter: brightness(1.15);
-      }
     }
 
     .cover {
@@ -1191,24 +1167,22 @@ br + .title {
     background-color: #aa9084;
   }
 }
-/* ==========================================
-   追加到底部：多资源拼接边框 (实心原色，无半透明，按数量分割)
-   ========================================== */
 .movie-list .item.x-multi-matched {
-  /* 清除原版发虚的背景色和边框色 */
   background-color: transparent !important;
   border-color: transparent !important;
   position: relative;
-  z-index: 1; 
 }
 
 .movie-list .item.x-multi-matched::before {
   content: "";
   position: absolute;
-  /* -0.375rem 刚好等同于原版边框的厚度，完美扩张出去 */
-  inset: -0.375rem; 
+  inset: 0;
+  padding: 0.375rem;
   background: var(--multi-match-bg) !important;
   border-radius: calc(0.375rem - 1px);
-  /* 核心：把这个鲜艳的多色背景垫在 .box 后面，中间会被白色/黑色的影片盒子盖住，四周只露出实心的纯色边框 */
-  z-index: -1; 
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 2;
 }

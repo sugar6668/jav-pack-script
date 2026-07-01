@@ -6,11 +6,11 @@
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
 // @icon            https://javdb.com/favicon.ico
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Grant.lib.js
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Magnet.lib.js
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Req.lib.js
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Req115.lib.js
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Util.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Grant.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Magnet.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Req.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Req115.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Util.lib.js
 // @connect         115.com
 // @run-at          document-end
 // @grant           GM_xmlhttpRequest
@@ -180,22 +180,22 @@ const formatTip = ({ n, s, t }) => `${n} - ${s} / ${t}`;
     normal: "var(--x-success)",
     crack: "var(--x-info)",
     subtitle: "var(--x-warning)",
+    both: "var(--x-danger)",
   };
 
   const movieList = document.querySelectorAll(MOVIE_SELECTOR);
   if (!movieList.length) return;
 
   const parseCodeCls = (code) => ["x", ...code.split(/[\s.\-_]/)].filter(Boolean).join("-");
-  const getMatchTypes = (sources) => {
-    const hasCrack = sources.some((it) => Magnet.crackReg.test(it.n));
-    const hasSubtitle = sources.some((it) => Magnet.zhReg.test(it.n));
-    const hasNormal = sources.some((it) => !Magnet.crackReg.test(it.n) && !Magnet.zhReg.test(it.n));
-    return [
-      hasNormal ? "normal" : "",
-      hasCrack ? "crack" : "",
-      hasSubtitle ? "subtitle" : "",
-    ].filter(Boolean);
+  const getMatchType = ({ n }) => {
+    const crack = Magnet.crackReg.test(n);
+    const subtitle = Magnet.zhReg.test(n);
+    if (crack && subtitle) return "both";
+    if (subtitle) return "subtitle";
+    if (crack) return "crack";
+    return "normal";
   };
+  const getMatchTypes = (sources) => sources.map(getMatchType);
   const getMatchGradient = (types) => {
     if (!types.length) return "";
     const step = 100 / types.length;
