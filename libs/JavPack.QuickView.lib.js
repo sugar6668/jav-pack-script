@@ -16,7 +16,7 @@ window.JavPackQuickView = class JavPackQuickView {
 
       const btn = doc.createElement("button");
       btn.type = "button";
-      btn.className = "button is-small x-un-hover is-info x-qv-button";
+      btn.className = "button is-small x-un-hover is-link x-qv-button";
       btn.textContent = "小窗预览";
       btn.title = "小窗预览";
       btn.onclick = (event) => {
@@ -74,8 +74,8 @@ window.JavPackQuickView = class JavPackQuickView {
       loading.remove();
     });
 
-    modal.append(closeBtn, iframe);
-    overlay.append(loading, modal);
+    modal.append(iframe);
+    overlay.append(loading, modal, closeBtn);
     document.body.appendChild(overlay);
   }
 
