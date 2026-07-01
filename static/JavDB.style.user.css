@@ -535,6 +535,12 @@ body:has(.x-load) #footer,
 }
 
 .x-layout-trigger {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 1.5;
   cursor: pointer;
 }
 

@@ -84,7 +84,7 @@
     const trigger = document.createElement("a");
     trigger.href = "javascript:void(0);";
     trigger.className = navList.matches("ul") ? "x-layout-trigger" : "navbar-item x-layout-trigger";
-    trigger.textContent = "布局";
+    trigger.textContent = "设置";
     triggerWrap.append(trigger);
     navList.append(triggerWrap);
 
