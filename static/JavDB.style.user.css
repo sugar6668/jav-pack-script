@@ -1481,7 +1481,7 @@ br + .title {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #000;
+  background: rgb(0 0 0 / 72%);
 }
 
 .x-qv-loading {
@@ -1508,8 +1508,8 @@ br + .title {
 
 .x-qv-close {
   position: fixed;
-  top: 0.5rem;
-  right: 0.5rem;
+  top: calc(2vh + 0.5rem);
+  right: max(1vw, calc((100vw - 1920px) / 2 + 0.5rem));
   z-index: 10;
   width: 2.25rem;
   height: 2.25rem;

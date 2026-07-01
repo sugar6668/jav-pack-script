@@ -2,6 +2,7 @@ window.JavPackQuickView = class JavPackQuickView {
   static CARD_SELECTOR = '.movie-list .item:not([data-qv-processed="1"])';
   static DETAIL_LINK_SELECTOR = 'a[href*="/v/"]';
   static OVERLAY_ID = "javdb-quick-view-modal";
+  static prefetched = new Set();
 
   ensureButtons(doc = document) {
     if (window.self !== window.top) return;
@@ -19,6 +20,8 @@ window.JavPackQuickView = class JavPackQuickView {
       btn.className = "button is-small x-un-hover is-link x-qv-button";
       btn.textContent = "小窗预览";
       btn.title = "小窗预览";
+      btn.onpointerenter = () => this.prefetch(link.href, doc);
+      btn.onfocus = () => this.prefetch(link.href, doc);
       btn.onclick = (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -27,6 +30,18 @@ window.JavPackQuickView = class JavPackQuickView {
 
       cover.appendChild(btn);
     });
+  }
+
+  prefetch(url, doc = document) {
+    if (!url || this.constructor.prefetched.has(url)) return;
+
+    this.constructor.prefetched.add(url);
+    const link = doc.createElement("link");
+    link.rel = "prefetch";
+    link.as = "document";
+    link.href = url;
+    link.dataset.qvPrefetch = url;
+    doc.head?.appendChild(link);
   }
 
   openIframeModal(url, sourceCard) {
@@ -56,6 +71,7 @@ window.JavPackQuickView = class JavPackQuickView {
     const iframe = document.createElement("iframe");
     iframe.className = "x-qv-iframe";
     iframe.loading = "eager";
+    iframe.setAttribute("fetchpriority", "high");
     iframe.src = url;
 
     const closeModal = () => {
