@@ -176,14 +176,40 @@ const formatTip = ({ n, s, t }) => `${n} - ${s} / ${t}`;
   const CODE_SELECTORS = [".video-title", "strong"];
   const CODE_SELECTOR = CODE_SELECTORS.join(" ");
   const TARGET_HTML = `<a href="${VOID}" class="tag is-normal ${TARGET_CLASS}">${TARGET_TXT}</a>`;
+  const MATCH_TYPE_COLORS = {
+    normal: "var(--x-success)",
+    crack: "var(--x-info)",
+    subtitle: "var(--x-warning)",
+  };
 
   const movieList = document.querySelectorAll(MOVIE_SELECTOR);
   if (!movieList.length) return;
 
   const parseCodeCls = (code) => ["x", ...code.split(/[\s.\-_]/)].filter(Boolean).join("-");
+  const getMatchTypes = (sources) => {
+    const hasCrack = sources.some((it) => Magnet.crackReg.test(it.n));
+    const hasSubtitle = sources.some((it) => Magnet.zhReg.test(it.n));
+    const hasNormal = sources.some((it) => !Magnet.crackReg.test(it.n) && !Magnet.zhReg.test(it.n));
+    return [
+      hasNormal ? "normal" : "",
+      hasCrack ? "crack" : "",
+      hasSubtitle ? "subtitle" : "",
+    ].filter(Boolean);
+  };
+  const getMatchGradient = (types) => {
+    if (!types.length) return "";
+    const step = 100 / types.length;
+    return `linear-gradient(180deg, ${types
+      .map((type, index) => {
+        const color = MATCH_TYPE_COLORS[type];
+        return `${color} ${index * step}% ${(index + 1) * step}%`;
+      })
+      .join(", ")})`;
+  };
 
   const matchAfter = ({ code, regex, target }, data) => {
-    target.closest(MOVIE_SELECTOR).classList.add(parseCodeCls(code));
+    const itemNode = target.closest(MOVIE_SELECTOR);
+    itemNode.classList.add(parseCodeCls(code));
     const sources = data.filter((it) => regex.test(it.n));
     const len = sources.length;
 
@@ -200,6 +226,7 @@ const formatTip = ({ n, s, t }) => `${n} - ${s} / ${t}`;
       const zh = zhs[0];
       const both = zhs.find((it) => Magnet.crackReg.test(it.n));
       const active = both ?? zh ?? crack ?? sources[0];
+      const types = getMatchTypes(sources);
 
       pc = active.pc;
       cid = active.cid;
@@ -207,6 +234,14 @@ const formatTip = ({ n, s, t }) => `${n} - ${s} / ${t}`;
       className = both ? "is-danger" : zh ? "is-warning" : crack ? "is-info" : "is-success";
       textContent = "已匹配";
       if (len > 1) textContent += ` ${len}`;
+
+      itemNode.classList.toggle("x-multi-matched", types.length > 1);
+      itemNode.dataset.matchTypes = types.join(" ");
+      itemNode.style.setProperty("--multi-match-bg", getMatchGradient(types));
+    } else {
+      itemNode.classList.remove("x-multi-matched");
+      delete itemNode.dataset.matchTypes;
+      itemNode.style.removeProperty("--multi-match-bg");
     }
 
     const node = target.querySelector(`.${TARGET_CLASS}`);
