@@ -998,15 +998,27 @@ br + .title {
   }
 
   .x-match.button {
+    display: flex !important;
+    flex-direction: column;
     flex-basis: 100%;
     width: 100%;
     min-width: 0;
+    max-width: 100%;
     text-align: left;
     padding: 4px 8px;
     align-items: flex-start;
     justify-content: flex-start;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
     white-space: normal;
-    height: auto;
+    word-break: break-word;
+    height: auto !important;
+    min-height: 0;
+    max-height: none;
+    line-height: 1.35;
+    -webkit-box-orient: initial;
+    -webkit-line-clamp: unset;
   }
 
   & > div.panel-block:first-child {
