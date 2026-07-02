@@ -178,9 +178,9 @@ const getPageDetails = (dom = document) => {
 
     CONT.querySelector(".review-buttons + .panel-block").insertAdjacentHTML(
       "afterend",
-      `<div class="panel-block">
-        <strong><a href="${VOID}" class="${load}">${TARGET_TXT}</a>:</strong>
-        &nbsp;<span class="value ${cont}">...</span>
+      `<div class="panel-block x-match-block">
+        <div class="x-match-heading"><strong><a href="${VOID}" class="${load}">${TARGET_TXT}</a>:</strong></div>
+        <div class="value ${cont}">...</div>
       </div>`,
     );
 
@@ -335,6 +335,7 @@ const getPageDetails = (dom = document) => {
 
       try {
         const { data = [] } = await Req115.filesSearchAllVideos(prefix);
+        const pendingItems = wait[prefix] || [];
         const matchedData = data.filter((item) => pendingItems.some(({ regex }) => regex.test(item.n)));
         const sources = await enrichMetadata(extractData(matchedData));
         GM_setValue(prefix, sources);

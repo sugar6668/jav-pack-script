@@ -936,10 +936,20 @@ br + .title {
     flex-direction: column !important;
   }
 
+  .x-match-heading {
+    margin-bottom: 0.5rem;
+    line-height: 1.5;
+  }
+
+  .x-match-block .x-match-cont {
+    gap: 0.375rem;
+  }
+
   /* 匹配项列表UI修复 */
   .zymatch-item {
     display: flex;
     flex-wrap: wrap;
+    min-width: 0;
     width: 100%;
     padding: 6px 0;
     border-bottom: 1px dashed #e8e8e8;
@@ -962,19 +972,23 @@ br + .title {
     .x-match-dir {
       display: block;
       width: 100%;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow: visible;
+      overflow-wrap: anywhere;
+      text-overflow: clip;
+      white-space: normal;
+      word-break: break-word;
     }
 
     .x-match-name {
       font-weight: 600;
+      line-height: 1.35;
     }
 
     .x-match-dir {
       margin-top: 0.125rem;
       font-size: var(--x-size-sm);
       font-weight: 400;
+      line-height: 1.35;
       color: #6c757d;
     }
 
@@ -985,8 +999,11 @@ br + .title {
 
   .x-match.button {
     flex-basis: 100%;
+    width: 100%;
+    min-width: 0;
     text-align: left;
     padding: 4px 8px;
+    align-items: flex-start;
     justify-content: flex-start;
     white-space: normal;
     height: auto;
