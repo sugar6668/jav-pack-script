@@ -140,7 +140,6 @@ Util.upStore();
         <a class="tag" href="${btdig}" target="_blank">${iconStr}<span>BTDigg</span></a>
         <a class="tag" href="${nyaa}" target="_blank">${iconStr}<span>Sukebei</span></a>
         <a class="tag" href="${u9a9}" target="_blank">${iconStr}<span>U9A9</span></a>
-        <button class="tag" type="button" data-refresh-magnets>${iconStr}<span>刷新磁力</span></button>
         <span class="tag">${iconStr}<span>筛选过滤</span></span>
         <span class="tag">${iconStr}<span>综合排序</span></span>
         <span class="tag is-flex-grow-1 is-justify-content-end">总数&nbsp;<span class="${countCls}">
@@ -153,6 +152,24 @@ Util.upStore();
 
     window.addEventListener(GM_info.script.name, () => {
       countNode.textContent = CONT.childElementCount;
+    });
+  };
+
+  const setRefreshButton = (onclick) => {
+    const tabsNode = document.querySelector(".tabs.no-bottom");
+    if (!tabsNode || tabsNode.querySelector("[data-refresh-magnets]")) return;
+
+    tabsNode.insertAdjacentHTML(
+      "beforeend",
+      `<div class="buttons mb-0 ml-2">
+        <button class="button is-info is-small" type="button" data-refresh-magnets>刷新磁力</button>
+      </div>`,
+    );
+
+    tabsNode.querySelector("[data-refresh-magnets]")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onclick(e.currentTarget);
     });
   };
 
@@ -169,8 +186,7 @@ Util.upStore();
     setMagnets(details);
   };
 
-  const refreshMagnets = async () => {
-    const trigger = CONT.previousElementSibling.querySelector("[data-refresh-magnets]");
+  const refreshMagnets = async (trigger) => {
     trigger?.classList.add("is-loading");
     trigger?.setAttribute("disabled", "");
 
@@ -189,7 +205,7 @@ Util.upStore();
     }
   };
 
-  CONT.previousElementSibling.querySelector("[data-refresh-magnets]")?.addEventListener("click", refreshMagnets);
+  setRefreshButton(refreshMagnets);
 
   if (!details.origin) setDetails(getMagnets(), "origin");
   if (!details.btdig) ReqMagnet.btdig(codeDetails).then((sources) => setDetails(sources, "btdig"));
