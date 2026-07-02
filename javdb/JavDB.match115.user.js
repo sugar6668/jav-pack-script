@@ -315,7 +315,9 @@ const getPageDetails = (dom = document) => {
     if (!code) return;
 
     if (!target.querySelector(`.${TARGET_CLASS}`)) target.insertAdjacentHTML("afterbegin", TARGET_HTML);
-    return { ...Util.codeParse(code), target };
+
+    const parsed = Util.codeParse(code);
+    return { ...parsed, searchKey: parsed.codes.join(" "), target };
   };
 
   const useMatchQueue = (before, after) => {
@@ -323,25 +325,28 @@ const getPageDetails = (dom = document) => {
     const queue = [];
     let loading = false;
 
-    const over = (pre, data = []) => {
-      wait[pre].forEach((it) => after?.(it, data));
-      delete wait[pre];
+    const over = (key, data = [], shouldCache = false) => {
+      wait[key].forEach((it) => {
+        const scoped = data.filter((file) => it.regex.test(file.n));
+        if (shouldCache) GM_setValue(it.code, scoped);
+        after?.(it, scoped);
+      });
+      delete wait[key];
     };
 
     const match = async () => {
       if (loading || !queue.length) return;
-      const prefix = queue[0];
+      const searchKey = queue[0];
       loading = true;
 
       try {
-        const { data = [] } = await Req115.filesSearchAllVideos(prefix);
-        const pendingItems = wait[prefix] || [];
+        const { data = [] } = await Req115.filesSearchAllVideos(searchKey);
+        const pendingItems = wait[searchKey] || [];
         const matchedData = data.filter((item) => pendingItems.some(({ regex }) => regex.test(item.n)));
         const sources = await enrichMetadata(extractData(matchedData));
-        GM_setValue(prefix, sources);
-        over(prefix, sources);
+        over(searchKey, sources, true);
       } catch (err) {
-        over(prefix);
+        over(searchKey);
         Util.print(err?.message);
       }
 
@@ -354,15 +359,15 @@ const getPageDetails = (dom = document) => {
       const details = before?.(node);
       if (!details) return;
 
-      const { code, prefix } = details;
+      const { code, prefix, searchKey } = details;
       const cache = GM_getValue(code) ?? GM_getValue(prefix);
-      if (cache) return after?.(details, cache);
+      if (cache && (!Array.isArray(cache) || cache.length)) return after?.(details, cache);
 
-      if (!wait[prefix]) wait[prefix] = [];
-      wait[prefix].push(details);
+      if (!wait[searchKey]) wait[searchKey] = [];
+      wait[searchKey].push(details);
 
-      if (queue.includes(prefix)) return;
-      queue.push(prefix);
+      if (queue.includes(searchKey)) return;
+      queue.push(searchKey);
       match();
     };
 
