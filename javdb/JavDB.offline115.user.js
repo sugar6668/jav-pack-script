@@ -131,11 +131,118 @@ const LOAD_CLASS = "is-loading";
 
 const MATCH_API = "reMatch";
 const MATCH_DELAY = 750;
+const WIKI_BASE_URL = "https://ja.wikipedia.org/wiki/";
+const ACTRESS_INFO_NOT_FOUND = "未找到演员信息";
 
 const { HOST, STATUS_KEY, STATUS_VAL } = Verify115;
 const { PENDING, VERIFIED, FAILED } = STATUS_VAL;
 
 const transToByte = Magnet.useTransByte();
+
+const escapeHtml = (value = "") => String(value)
+  .replaceAll("&", "&amp;")
+  .replaceAll("<", "&lt;")
+  .replaceAll(">", "&gt;")
+  .replaceAll('"', "&quot;");
+
+const normalizeText = (value = "") => String(value).replace(/\[[^\]]+\]/g, "").replace(/\s+/g, " ").trim();
+
+const getActorPanel = (dom = document) => {
+  return [...dom.querySelectorAll(".movie-panel-info > .panel-block")].find((item) => item.querySelector("strong")?.textContent.trim() === "演員:");
+};
+
+const getActorLinks = (dom = document) => {
+  const panel = getActorPanel(dom);
+  const valueNode = panel?.querySelector(".value");
+  if (!valueNode) return [];
+
+  return [...valueNode.querySelectorAll('a[href*="/actors/"]')].map((node, index) => ({
+    node,
+    index,
+    name: node.textContent.trim(),
+  })).filter((item) => item.name);
+};
+
+const getWikiProfileValue = (dom, labels) => {
+  const rows = [...dom.querySelectorAll("table tr")];
+  const row = rows.find((item) => {
+    const label = normalizeText(item.querySelector("th")?.textContent);
+    return labels.some((name) => label.includes(name));
+  });
+  return normalizeText(row?.querySelector("td")?.textContent);
+};
+
+const fetchActressInfo = async ({ name }) => {
+  const url = `${WIKI_BASE_URL}${encodeURIComponent(name)}`;
+
+  try {
+    const dom = await Req.request({ url, responseType: "document" });
+    const text = normalizeText(dom.body?.textContent);
+    const isActress = /女優|AV女優/.test(text);
+    if (!isActress) return { name, url, isActress: false };
+
+    const birthday = getWikiProfileValue(dom, ["生年月日"]);
+    const age = getWikiProfileValue(dom, ["現年齢"]);
+    const height = getWikiProfileValue(dom, ["身長"]);
+    const sizes = getWikiProfileValue(dom, ["スリーサイズ"]);
+    const cup = getWikiProfileValue(dom, ["ブラサイズ"]);
+    const heightText = height.match(/\d+(?:\.\d+)?\s*cm/i)?.[0] || "";
+    const sizesText = sizes.replace(/\s*cm\b/i, "").trim();
+
+    return { name, url, isActress, birthday, age, height: heightText, sizes: sizesText, cup };
+  } catch {
+    return { name, url, isActress: false, notFound: true };
+  }
+};
+
+const renderActressInfo = (info) => {
+  const tags = [
+    [info.birthday, info.age].filter(Boolean).join(" "),
+    info.height,
+    [info.sizes, info.cup].filter(Boolean).join(" "),
+  ].filter(Boolean);
+
+  return `
+    <a href="${escapeHtml(info.url)}" target="_blank" rel="noopener noreferrer">
+      <span class="tag is-link is-light">${escapeHtml(info.name)}</span>
+      ${tags.map((tag) => `<span class="tag is-light">${escapeHtml(tag)}</span>`).join("")}
+    </a>
+  `;
+};
+
+const renderActressInfoPanel = (infoNode, actorInfos) => {
+  infoNode.querySelector(".actress-info")?.remove();
+  const actresses = actorInfos.filter((item) => item.isActress);
+  const content = actresses.length ? actresses.map(renderActressInfo).join("") : ACTRESS_INFO_NOT_FOUND;
+  const actorPanel = getActorPanel();
+  const html = `<div class="panel-block actress-info"><strong>演员信息: </strong><div class="value">${content}</div></div>`;
+
+  if (actorPanel) actorPanel.insertAdjacentHTML("afterend", html);
+  else infoNode.insertAdjacentHTML("beforeend", html);
+};
+
+const sortActorsByActress = (actorLinks, actorInfos) => {
+  const actressNames = new Set(actorInfos.filter((item) => item.isActress).map((item) => item.name));
+  const sorted = actorLinks.toSorted((a, b) => Number(actressNames.has(b.name)) - Number(actressNames.has(a.name)) || a.index - b.index);
+  const parent = actorLinks[0]?.node.parentElement;
+  if (!parent) return;
+
+  parent.textContent = "";
+  sorted.forEach(({ node }, index) => {
+    if (index) parent.appendChild(document.createTextNode("\n"));
+    parent.appendChild(node);
+  });
+};
+
+const ensureActressInfo = async (dom = document) => {
+  const infoNode = dom.querySelector(".movie-panel-info");
+  const actorLinks = getActorLinks(dom);
+  if (!infoNode || !actorLinks.length) return;
+
+  const actorInfos = await Promise.all(actorLinks.map(fetchActressInfo));
+  sortActorsByActress(actorLinks, actorInfos);
+  renderActressInfoPanel(infoNode, actorInfos);
+};
 
 const onShortcut = () => {
   let hovered = null;
@@ -298,6 +405,8 @@ const offline = async ({ options, magnets, onstart, onprogress, onfinally }, cur
 (async function () {
   const details = getDetails();
   if (!details) return;
+
+  ensureActressInfo().catch((err) => Util.print(err?.message));
 
   const CONFIG = await getConfig();
   const actions = Offline.getActions(CONFIG, details);
