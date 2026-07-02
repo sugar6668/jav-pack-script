@@ -140,6 +140,7 @@ Util.upStore();
         <a class="tag" href="${btdig}" target="_blank">${iconStr}<span>BTDigg</span></a>
         <a class="tag" href="${nyaa}" target="_blank">${iconStr}<span>Sukebei</span></a>
         <a class="tag" href="${u9a9}" target="_blank">${iconStr}<span>U9A9</span></a>
+        <button class="tag" type="button" data-refresh-magnets>${iconStr}<span>刷新磁力</span></button>
         <span class="tag">${iconStr}<span>筛选过滤</span></span>
         <span class="tag">${iconStr}<span>综合排序</span></span>
         <span class="tag is-flex-grow-1 is-justify-content-end">总数&nbsp;<span class="${countCls}">
@@ -167,6 +168,28 @@ Util.upStore();
     GM_setValue(mid, details);
     setMagnets(details);
   };
+
+  const refreshMagnets = async () => {
+    const trigger = CONT.previousElementSibling.querySelector("[data-refresh-magnets]");
+    trigger?.classList.add("is-loading");
+    trigger?.setAttribute("disabled", "");
+
+    try {
+      details.origin = getMagnets();
+      details.btdig = await ReqMagnet.btdig(codeDetails);
+      details.nyaa = await ReqMagnet.nyaa(codeDetails);
+      details.u9a9 = await ReqMagnet.u9a9(codeDetails);
+      GM_setValue(mid, details);
+      setMagnets(details);
+    } catch (err) {
+      Util.print(err?.message);
+    } finally {
+      trigger?.classList.remove("is-loading");
+      trigger?.removeAttribute("disabled");
+    }
+  };
+
+  CONT.previousElementSibling.querySelector("[data-refresh-magnets]")?.addEventListener("click", refreshMagnets);
 
   if (!details.origin) setDetails(getMagnets(), "origin");
   if (!details.btdig) ReqMagnet.btdig(codeDetails).then((sources) => setDetails(sources, "btdig"));
