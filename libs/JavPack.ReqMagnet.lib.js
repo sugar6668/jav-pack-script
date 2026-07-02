@@ -45,4 +45,32 @@ class ReqMagnet extends Req {
       },
     ]);
   }
+
+  /**
+   * @connect u9a9.com
+   */
+  static u9a9({ code, regex }) {
+    return this.tasks(`https://u9a9.com/?type=2&search=${code}`, [
+      (dom) => {
+        return [...dom.querySelectorAll('a[href^="magnet:"]')]
+          .map((link) => {
+            const row = link.closest("tr, li, .item, .row, .card") || link.parentElement;
+            const text = row?.textContent.replace(/\s+/g, " ").trim() || link.textContent.trim();
+            const size = text.match(/\d+(?:\.\d+)?\s*(?:GB|MB|KB|TB|GiB|MiB|KiB|TiB)/i)?.[0]?.replace(/\s/g, "") || "";
+            const date = text.match(/\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/)?.[0] || "";
+            const name = (row?.querySelector('a:not([href^="magnet:"])')?.textContent || link.textContent || text)
+              .replace(/\s+/g, " ")
+              .trim();
+
+            return {
+              url: link.href,
+              name,
+              size,
+              date,
+            };
+          })
+          .filter(({ url, name }) => url && regex.test(name));
+      },
+    ]);
+  }
 }

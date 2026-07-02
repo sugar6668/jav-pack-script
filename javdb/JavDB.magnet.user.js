@@ -6,12 +6,13 @@
 // @description     磁链扩展
 // @match           https://javdb.com/v/*
 // @icon            https://javdb.com/favicon.ico
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Magnet.lib.js
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Req.lib.js
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.ReqMagnet.lib.js
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Util.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Magnet.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Req.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.ReqMagnet.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Util.lib.js
 // @connect         btdig.com
 // @connect         nyaa.si
+// @connect         u9a9.com
 // @run-at          document-end
 // @grant           GM_xmlhttpRequest
 // @grant           GM_deleteValues
@@ -130,6 +131,7 @@ Util.upStore();
 
     const btdig = `https://btdig.com/search?order=0&q=${code}`;
     const nyaa = `https://sukebei.nyaa.si/?f=0&c=2_2&q=${code}`;
+    const u9a9 = `https://u9a9.com/?type=2&search=${code}`;
     const iconStr = "<span class='icon is-small'><i class='icon-check-circle'></i></span>";
 
     CONT.insertAdjacentHTML(
@@ -137,6 +139,7 @@ Util.upStore();
       `<div class="tags mb-1">
         <a class="tag" href="${btdig}" target="_blank">${iconStr}<span>BTDigg</span></a>
         <a class="tag" href="${nyaa}" target="_blank">${iconStr}<span>Sukebei</span></a>
+        <a class="tag" href="${u9a9}" target="_blank">${iconStr}<span>U9A9</span></a>
         <span class="tag">${iconStr}<span>筛选过滤</span></span>
         <span class="tag">${iconStr}<span>综合排序</span></span>
         <span class="tag is-flex-grow-1 is-justify-content-end">总数&nbsp;<span class="${countCls}">
@@ -168,4 +171,5 @@ Util.upStore();
   if (!details.origin) setDetails(getMagnets(), "origin");
   if (!details.btdig) ReqMagnet.btdig(codeDetails).then((sources) => setDetails(sources, "btdig"));
   if (!details.nyaa) ReqMagnet.nyaa(codeDetails).then((sources) => setDetails(sources, "nyaa"));
+  if (!details.u9a9) ReqMagnet.u9a9(codeDetails).then((sources) => setDetails(sources, "u9a9"));
 })();
