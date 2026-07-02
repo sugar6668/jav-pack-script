@@ -30,11 +30,7 @@ window.JavPackSubtitle = class JavPackSubtitle {
   }
 
   static buildSearchKeywords(details = {}) {
-    return [
-      this.sanitizeName(details.code || ""),
-      this.sanitizeName([details.code, details.title].filter(Boolean).join(" ")),
-      this.sanitizeName(details.title || ""),
-    ].filter((item, index, list) => item && list.indexOf(item) === index);
+    return [this.buildDefaultKeyword(details)].filter(Boolean);
   }
 
   static buildSubtitleBaseName(details = {}) {
@@ -103,7 +99,6 @@ window.JavPackSubtitle = class JavPackSubtitle {
   }
 
   static modalTemplate(defaultKw) {
-    const candidates = this.buildSearchKeywords(this.currentDetails || {});
     return `
       <div class="pdb-sub-modal">
         <div class="pdb-sub-header">
@@ -111,9 +106,6 @@ window.JavPackSubtitle = class JavPackSubtitle {
             <span class="pdb-sub-title">迅雷字幕检索:</span>
             <input type="text" id="sub-search-input" value="${this.escapeHtml(defaultKw)}" class="pdb-sub-input" placeholder="输入检索词..." />
             <button id="sub-search-btn" class="pdb-sub-btn">重新搜索</button>
-            <div class="pdb-sub-keywords">
-              ${candidates.map((keyword) => `<button type="button" class="pdb-sub-keyword" data-keyword="${this.escapeHtml(keyword)}">${this.escapeHtml(keyword)}</button>`).join("")}
-            </div>
           </div>
           <span class="pdb-sub-close" id="sub-close-btn">&times;</span>
         </div>
@@ -185,12 +177,6 @@ window.JavPackSubtitle = class JavPackSubtitle {
     };
 
     overlay.querySelector("#sub-search-btn").addEventListener("click", () => performSearch(input.value.trim()));
-    overlay.querySelectorAll(".pdb-sub-keyword").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        input.value = btn.dataset.keyword;
-        performSearch(input.value.trim());
-      });
-    });
     input.addEventListener("keypress", (e) => {
       if (e.key === "Enter") performSearch(input.value.trim());
     });
