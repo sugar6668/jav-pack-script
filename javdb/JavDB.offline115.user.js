@@ -151,16 +151,27 @@ const getActorPanel = (dom = document) => {
   return [...dom.querySelectorAll(".movie-panel-info > .panel-block")].find((item) => item.querySelector("strong")?.textContent.trim() === "演員:");
 };
 
-const getActorLinks = (dom = document) => {
+const getActorItems = (dom = document) => {
   const panel = getActorPanel(dom);
   const valueNode = panel?.querySelector(".value");
   if (!valueNode) return [];
 
-  return [...valueNode.querySelectorAll('a[href*="/actors/"]')].map((node, index) => ({
-    node,
-    index,
-    name: node.textContent.trim(),
-  })).filter((item) => item.name);
+  const actorLinks = [...valueNode.querySelectorAll('a[href*="/actors/"]')];
+  return actorLinks.map((node, index) => {
+    const nextNode = actorLinks[index + 1];
+    const nodes = [node];
+    let cursor = node.nextSibling;
+
+    while (cursor && cursor !== nextNode) {
+      nodes.push(cursor);
+      cursor = cursor.nextSibling;
+    }
+
+    const text = nodes.map((item) => item.textContent || "").join("");
+    const name = node.textContent.trim();
+
+    return { node, nodes, index, name, isFemale: /♀/.test(text) };
+  }).filter((item) => item.name);
 };
 
 const getWikiProfileValue = (dom, labels) => {
@@ -178,8 +189,6 @@ const fetchActressInfo = async ({ name }) => {
   try {
     const dom = await Req.request({ url, responseType: "document" });
     const text = normalizeText(dom.body?.textContent);
-    const isActress = /女優|AV女優/.test(text);
-    if (!isActress) return { name, url, isActress: false };
 
     const birthday = getWikiProfileValue(dom, ["生年月日"]);
     const age = getWikiProfileValue(dom, ["現年齢"]);
@@ -189,9 +198,9 @@ const fetchActressInfo = async ({ name }) => {
     const heightText = height.match(/\d+(?:\.\d+)?\s*cm/i)?.[0] || "";
     const sizesText = sizes.replace(/\s*cm\b/i, "").trim();
 
-    return { name, url, isActress, birthday, age, height: heightText, sizes: sizesText, cup };
+    return { name, url, birthday, age, height: heightText, sizes: sizesText, cup };
   } catch {
-    return { name, url, isActress: false, notFound: true };
+    return { name, url, notFound: true };
   }
 };
 
@@ -212,8 +221,8 @@ const renderActressInfo = (info) => {
 
 const renderActressInfoPanel = (infoNode, actorInfos) => {
   infoNode.querySelector(".actress-info")?.remove();
-  const actresses = actorInfos.filter((item) => item.isActress);
-  const content = actresses.length ? actresses.map(renderActressInfo).join("") : ACTRESS_INFO_NOT_FOUND;
+  const found = actorInfos.filter((item) => !item.notFound);
+  const content = found.length ? found.map(renderActressInfo).join("") : ACTRESS_INFO_NOT_FOUND;
   const actorPanel = getActorPanel();
   const html = `<div class="panel-block actress-info"><strong>演员信息: </strong><div class="value">${content}</div></div>`;
 
@@ -221,26 +230,25 @@ const renderActressInfoPanel = (infoNode, actorInfos) => {
   else infoNode.insertAdjacentHTML("beforeend", html);
 };
 
-const sortActorsByActress = (actorLinks, actorInfos) => {
-  const actressNames = new Set(actorInfos.filter((item) => item.isActress).map((item) => item.name));
-  const sorted = actorLinks.toSorted((a, b) => Number(actressNames.has(b.name)) - Number(actressNames.has(a.name)) || a.index - b.index);
-  const parent = actorLinks[0]?.node.parentElement;
+const sortActorsByGender = (actorItems) => {
+  const sorted = actorItems.toSorted((a, b) => Number(b.isFemale) - Number(a.isFemale) || a.index - b.index);
+  const parent = actorItems[0]?.node.parentElement;
   if (!parent) return;
 
-  parent.textContent = "";
-  sorted.forEach(({ node }, index) => {
-    if (index) parent.appendChild(document.createTextNode("\n"));
-    parent.appendChild(node);
+  sorted.forEach((item) => {
+    item.nodes.forEach((node) => parent.appendChild(node));
   });
 };
 
 const ensureActressInfo = async (dom = document) => {
   const infoNode = dom.querySelector(".movie-panel-info");
-  const actorLinks = getActorLinks(dom);
-  if (!infoNode || !actorLinks.length) return;
+  const actorItems = getActorItems(dom);
+  if (!infoNode || !actorItems.length) return;
 
-  const actorInfos = await Promise.all(actorLinks.map(fetchActressInfo));
-  sortActorsByActress(actorLinks, actorInfos);
+  const actressItems = actorItems.filter((item) => item.isFemale);
+  sortActorsByGender(actorItems);
+
+  const actorInfos = await Promise.all(actressItems.map(fetchActressInfo));
   renderActressInfoPanel(infoNode, actorInfos);
 };
 
