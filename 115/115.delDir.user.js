@@ -6,8 +6,8 @@
 // @description     播放页删除
 // @match           https://115vod.com/*
 // @icon            https://115vod.com/m_r/favicon.ico
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Req.lib.js
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Req115.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Req.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Req115.lib.js
 // @connect         115.com
 // @connect         self
 // @run-at          document-end

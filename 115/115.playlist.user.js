@@ -7,8 +7,8 @@
 // @match           https://115.com/*
 // @match           https://115vod.com/*
 // @icon            https://115vod.com/m_r/favicon.ico
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Grant.lib.js
-// @require         https://github.com/bolin-dev/JavPack/raw/main/libs/JavPack.Util.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Grant.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Util.lib.js
 // @run-at          document-end
 // @grant           GM_deleteValues
 // @grant           GM_deleteValue
