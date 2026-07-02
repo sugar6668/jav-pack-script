@@ -85,6 +85,15 @@ const listenClick = (onclose, defaultAction) => {
   document.addEventListener("contextmenu", onclick);
 };
 
+const openMatchFolder = (target, onclose) => {
+  const cid = target?.dataset.cid;
+  if (!cid) return false;
+
+  const tab = Grant.openTab(`https://115.com/?cid=${cid}&mode=wangpan`);
+  tab.onclose = () => onclose?.(target);
+  return true;
+};
+
 const formatBytes = (bytes, k = 1024) => {
   if (bytes < k) return "0KB";
   const units = ["KB", "MB", "GB", "TB"];
@@ -204,6 +213,15 @@ const getPageDetails = (dom = document) => {
     target.textContent = TARGET_TXT;
     matcher();
   };
+
+  block.cont.addEventListener("click", (e) => {
+    const target = e.target.closest(`.${TARGET_CLASS}`);
+    if (!target || !block.cont.contains(target)) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    openMatchFolder(target, matcher);
+  }, true);
 
   block.load.addEventListener("click", refresh);
   window.JavPackMatch115Console?.bindActions(block.cont, {
