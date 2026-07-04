@@ -96,7 +96,6 @@ window.JavPackQuickView = class JavPackQuickView {
     document.body.appendChild(overlay);
   }
 
-
   injectIframeFancyboxGuard(iframe) {
     try {
       const iWin = iframe.contentWindow;
@@ -114,6 +113,7 @@ window.JavPackQuickView = class JavPackQuickView {
         iDoc.body?.classList.remove("fancybox-active", "compensate-for-scrollbar");
       };
 
+      const closeEvents = new Set(["pointerup", "mouseup", "touchend", "click"]);
       const guard = (event) => {
         const container = event.target?.closest?.(".fancybox-container");
         if (!container) return;
@@ -122,11 +122,12 @@ window.JavPackQuickView = class JavPackQuickView {
 
         event.preventDefault();
         event.stopImmediatePropagation();
-        if (event.type === "click") closeFancybox();
+        if (closeEvents.has(event.type)) closeFancybox();
       };
 
-      iDoc.addEventListener("pointerdown", guard, true);
-      iDoc.addEventListener("click", guard, true);
+      ["pointerdown", "pointerup", "mousedown", "mouseup", "touchstart", "touchend", "click"].forEach((type) => {
+        iDoc.addEventListener(type, guard, true);
+      });
     } catch (err) {
       console.warn("[JavPackQuickView]", err?.message);
     }
