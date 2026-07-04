@@ -18,6 +18,7 @@
 // @run-at          document-end
 // @grant           GM_xmlhttpRequest
 // @grant           GM_deleteValues
+// @grant           GM_deleteValue
 // @grant           GM_listValues
 // @grant           unsafeWindow
 // @grant           GM_openInTab
@@ -27,7 +28,7 @@
 // @require         https://github.com/Tampermonkey/utils/raw/d8a4543a5f828dfa8eefb0a3360859b6fe9c3c34/requires/gh_2215_make_GM_xhr_more_parallel_again.js
 // ==/UserScript==
 
-Util.upStore();
+// Util.upStore();
 
 const TARGET_TXT = "匹配中";
 const TARGET_CLASS = "x-match";
@@ -35,6 +36,67 @@ const TARGET_CLASS = "x-match";
 const VOID = "javascript:void(0);";
 const CHANNEL = new BroadcastChannel(GM_info.script.name);
 const MATCH_API = "reMatch";
+
+const MatchCache = (() => {
+  const PREFIX = "jdb_match_v1_";
+  const TTL_HIT = 30 * 24 * 60 * 60 * 1000;
+  const TTL_EMPTY = 30 * 60 * 1000;
+  const mem = new Map();
+
+  const normalize = (key) => String(key || "").trim().toUpperCase();
+  const fullKey = (key) => PREFIX + normalize(key);
+  const ttl = (data) => (data.length ? TTL_HIT : TTL_EMPTY);
+  const valid = (value) => value && typeof value.ts === "number" && Array.isArray(value.data);
+  const expired = ({ ts, data }) => Date.now() - ts > ttl(data);
+
+  const del = (key) => {
+    const cacheKey = normalize(key);
+    if (!cacheKey) return;
+    mem.delete(cacheKey);
+    GM_deleteValue(fullKey(cacheKey));
+  };
+
+  const get = (key) => {
+    const cacheKey = normalize(key);
+    if (!cacheKey) return null;
+
+    let value = mem.get(cacheKey);
+    if (!value) {
+      value = GM_getValue(fullKey(cacheKey));
+      if (valid(value)) mem.set(cacheKey, value);
+    }
+
+    if (!valid(value)) return null;
+    if (expired(value)) {
+      del(cacheKey);
+      return null;
+    }
+
+    return value.data;
+  };
+
+  const set = (key, data) => {
+    const cacheKey = normalize(key);
+    if (!cacheKey || !Array.isArray(data)) return;
+    const value = { ts: Date.now(), data };
+    mem.set(cacheKey, value);
+    GM_setValue(fullKey(cacheKey), value);
+  };
+
+  const sweep = () => {
+    setTimeout(() => {
+      GM_listValues().forEach((key) => {
+        if (!key.startsWith(PREFIX)) return;
+        const value = GM_getValue(key);
+        if (!valid(value) || expired(value)) GM_deleteValue(key);
+      });
+    }, 10 * 1000);
+  };
+
+  sweep();
+  return { get, set, del, sweep };
+})();
+
 
 const listenClick = (onclose, defaultAction) => {
   const actions = {
@@ -171,7 +233,7 @@ const getPageDetails = (dom = document) => {
 
       const sources = await enrichMetadata(extractData(data.filter((it) => regex.test(it.n))));
       cont.innerHTML = sources.map((item) => render(item, codeDetails)).join("") || "暂无匹配";
-      GM_setValue(code, sources);
+      MatchCache.set(code, sources);
     } catch (err) {
       if (load.dataset.uid !== UUID) return;
       cont.innerHTML = "匹配失败";
@@ -202,16 +264,25 @@ const getPageDetails = (dom = document) => {
   const code = CONT.querySelector(".first-block .value").textContent.trim();
   const codeDetails = getPageDetails() || Util.codeParse(code);
   const block = addBlock();
-  const matcher = () => matchCode(codeDetails, block);
+  const matcher = (force = false) => {
+    const cache = force ? null : MatchCache.get(code);
+    if (cache !== null) {
+      block.cont.innerHTML = cache.map((item) => render(item, codeDetails)).join("") || "暂无匹配";
+      block.load.textContent = "115";
+      return;
+    }
+
+    return matchCode(codeDetails, block);
+  };
 
   matcher();
-  listenClick(matcher);
+  listenClick(() => matcher(true));
   unsafeWindow[MATCH_API] = matcher;
 
   const refresh = ({ target }) => {
     if (target.textContent === TARGET_TXT) return;
     target.textContent = TARGET_TXT;
-    matcher();
+    matcher(true);
   };
 
   block.cont.addEventListener("click", (e) => {
@@ -220,7 +291,7 @@ const getPageDetails = (dom = document) => {
 
     e.preventDefault();
     e.stopPropagation();
-    openMatchFolder(target, matcher);
+    openMatchFolder(target, () => matcher(true));
   }, true);
 
   block.load.addEventListener("click", refresh);
@@ -229,15 +300,16 @@ const getPageDetails = (dom = document) => {
     grant: Grant,
     details: codeDetails,
     removeFromCache: (item, action) => {
-      const cache = GM_getValue(code) || [];
+      const cache = MatchCache.get(code) || [];
       const next = cache.filter((file) => {
         if (action === "delv") return String(file.fid) !== String(item.fid);
         if (action === "delf") return String(file.cid) !== String(item.cid);
         return true;
       });
-      GM_setValue(code, next);
+      if (next.length > 0) MatchCache.set(code, next);
+      else MatchCache.del(code);
     },
-    refresh: matcher,
+    refresh: () => matcher(true),
   });
   window.addEventListener("beforeunload", () => CHANNEL.postMessage(code));
 })();
@@ -346,7 +418,7 @@ const getPageDetails = (dom = document) => {
     const over = (key, data = [], shouldCache = false) => {
       wait[key].forEach((it) => {
         const scoped = data.filter((file) => it.regex.test(file.n));
-        if (shouldCache) GM_setValue(it.code, scoped);
+        if (shouldCache) MatchCache.set(it.code, scoped);
         after?.(it, scoped);
       });
       delete wait[key];
@@ -378,8 +450,8 @@ const getPageDetails = (dom = document) => {
       if (!details) return;
 
       const { code, prefix, searchKey } = details;
-      const cache = GM_getValue(code) ?? GM_getValue(prefix);
-      if (cache && (!Array.isArray(cache) || cache.length)) return after?.(details, cache);
+      const cache = MatchCache.get(code) ?? MatchCache.get(prefix);
+      if (cache !== null) return after?.(details, cache);
 
       if (!wait[searchKey]) wait[searchKey] = [];
       wait[searchKey].push(details);
@@ -427,7 +499,7 @@ const getPageDetails = (dom = document) => {
       if (target.dataset.uid !== UUID) return;
 
       const sources = await enrichMetadata(extractData(data.filter((it) => regex.test(it.n))));
-      GM_setValue(code, sources);
+      MatchCache.set(code, sources);
     } catch (err) {
       if (target.dataset.uid !== UUID) return;
       Util.print(err?.message);
