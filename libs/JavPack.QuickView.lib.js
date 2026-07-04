@@ -87,12 +87,49 @@ window.JavPackQuickView = class JavPackQuickView {
 
     iframe.addEventListener("load", () => {
       this.injectIframeStyle(iframe);
+      this.injectIframeFancyboxGuard(iframe);
       loading.remove();
     });
 
     modal.append(iframe);
     overlay.append(loading, modal, closeBtn);
     document.body.appendChild(overlay);
+  }
+
+
+  injectIframeFancyboxGuard(iframe) {
+    try {
+      const iWin = iframe.contentWindow;
+      const iDoc = iframe.contentDocument || iWin.document;
+      if (!iDoc || iDoc.documentElement.dataset.qvFancyboxGuard === "1") return;
+      iDoc.documentElement.dataset.qvFancyboxGuard = "1";
+
+      const closeFancybox = () => {
+        const jq = iWin.jQuery || iWin.$;
+        if (jq?.fancybox?.close) return jq.fancybox.close();
+        if (iWin.Fancybox?.close) return iWin.Fancybox.close();
+
+        iDoc.querySelectorAll(".fancybox-container").forEach((node) => node.remove());
+        iDoc.documentElement.classList.remove("fancybox-enabled", "fancybox-active");
+        iDoc.body?.classList.remove("fancybox-active", "compensate-for-scrollbar");
+      };
+
+      const guard = (event) => {
+        const container = event.target?.closest?.(".fancybox-container");
+        if (!container) return;
+        const interactive = event.target.closest(".fancybox-content, .fancybox-button, .fancybox-navigation");
+        if (interactive) return;
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (event.type === "click") closeFancybox();
+      };
+
+      iDoc.addEventListener("pointerdown", guard, true);
+      iDoc.addEventListener("click", guard, true);
+    } catch (err) {
+      console.warn("[JavPackQuickView]", err?.message);
+    }
   }
 
   injectIframeStyle(iframe) {
