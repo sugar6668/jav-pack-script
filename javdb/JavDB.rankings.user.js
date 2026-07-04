@@ -3,6 +3,7 @@
 // @namespace       JavDB.rankings.local
 // @version         0.1.0
 // @match           https://javdb.com/*
+// @icon            https://javdb.com/favicon.ico
 // @connect         jdforrepam.com
 // @grant           GM_xmlhttpRequest
 // @grant           GM_getValue
