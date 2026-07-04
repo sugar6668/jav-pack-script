@@ -85,7 +85,7 @@ function getApiHeaders(token = "") {
     "Host": "jdforrepam.com",
     "jdSignature": genSig(),
   };
-  if (token) h.Authorization = `Bearer ${token}`;
+  if (token) h.Authorization = /^Bearer\s+/i.test(token) ? token : `Bearer ${token}`;
   return h;
 }
 
@@ -145,18 +145,17 @@ function getApiHeaders(token = "") {
 
   const request = ({ path, query, headers = {} }) => new Promise((resolve, reject) => {
     const url = new URL(path, API_BASE);
+    const safeHeaders = Object.fromEntries(Object.entries(headers).filter(([key]) => !/^(host|user-agent)$/i.test(key)));
     Object.entries(query || {}).forEach(([key, value]) => {
       if (value !== "" && value !== undefined && value !== null) url.searchParams.set(key, value);
     });
     GM_xmlhttpRequest({
       method: path === "/api/v1/sessions" ? "POST" : "GET",
       url: url.href,
-      headers,
-      anonymous: false,
-      withCredentials: true,
+      headers: safeHeaders,
       onload: (res) => (res.status >= 200 && res.status < 300 ? resolve(res) : reject(res)),
-      onerror: reject,
-      ontimeout: reject,
+      onerror: (err) => reject(err || new Error("network error")),
+      ontimeout: () => reject(new Error("request timeout")),
     });
   });
 
