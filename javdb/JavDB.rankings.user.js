@@ -145,18 +145,25 @@ function getApiHeaders(token = "") {
 
   const request = ({ path, query, headers = {} }) => new Promise((resolve, reject) => {
     const url = new URL(path, API_BASE);
+    const method = path === "/api/v1/sessions" ? "POST" : "GET";
     const safeHeaders = Object.fromEntries(Object.entries(headers).filter(([key]) => !/^(host|user-agent)$/i.test(key)));
     Object.entries(query || {}).forEach(([key, value]) => {
       if (value !== "" && value !== undefined && value !== null) url.searchParams.set(key, value);
     });
-    GM_xmlhttpRequest({
-      method: path === "/api/v1/sessions" ? "POST" : "GET",
+
+    const done = (res) => (res.status >= 200 && res.status < 300 ? resolve(res) : reject(res));
+    const gm = () => GM_xmlhttpRequest({
+      method,
       url: url.href,
       headers: safeHeaders,
-      onload: (res) => (res.status >= 200 && res.status < 300 ? resolve(res) : reject(res)),
+      onload: done,
       onerror: (err) => reject(err || new Error("network error")),
       ontimeout: () => reject(new Error("request timeout")),
     });
+
+    fetch(url.href, { method, headers: safeHeaders })
+      .then(async (resp) => done({ status: resp.status, responseText: await resp.text() }))
+      .catch(gm);
   });
 
   const getCache = (key) => {
