@@ -1579,6 +1579,30 @@ br + .title {
 }
 
 
+
+.x-rankings-nav {
+  .x-rankings-trigger {
+    display: inline-flex;
+    gap: 0.25rem;
+    align-items: center;
+    height: 100%;
+    cursor: pointer;
+  }
+
+  &.dropdown {
+    position: relative;
+
+    .dropdown-menu {
+      min-width: 8rem;
+    }
+  }
+
+  &.dropdown.is-active .dropdown-menu,
+  &.dropdown:hover .dropdown-menu {
+    display: block;
+  }
+}
+
 .x-rankings-page {
   .x-rank-controls {
     display: flex;

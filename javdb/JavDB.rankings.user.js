@@ -8,6 +8,7 @@
 // @grant           GM_xmlhttpRequest
 // @grant           GM_getValue
 // @grant           GM_setValue
+// @grant           GM_deleteValue
 // @run-at          document-end
 // ==/UserScript==
 
@@ -104,8 +105,16 @@ function getApiHeaders(token = "") {
     uncoded: "\u65e0\u7801",
     all: "\u5168\u90e8",
     highScore: "\u9ad8\u5206",
-    needLogin: "\u8bf7\u5148\u767b\u5f55 JavDB",
-    badToken: "\u767b\u5f55\u72b6\u6001\u65e0\u6548\u6216\u6743\u9650\u4e0d\u8db3",
+    tokenSaved: "token \u5df2\u4fdd\u5b58",
+    saveToken: "\u4fdd\u5b58 token",
+    noToken: "\u8bf7\u5148\u8bbe\u7f6e token",
+    badToken: "token \u65e0\u6548\u6216\u6743\u9650\u4e0d\u8db3",
+    genToken: "\u751f\u6210 token",
+    tokenGenerated: "token \u5df2\u751f\u6210\u5e76\u4fdd\u5b58",
+    tokenFailed: "\u751f\u6210 token \u5931\u8d25\uff1a",
+    inputAccount: "\u8bf7\u8f93\u5165\u8d26\u53f7\u548c\u5bc6\u7801",
+    username: "\u8d26\u53f7",
+    password: "\u5bc6\u7801",
     badShape: "\u63a5\u53e3\u8fd4\u56de\u7ed3\u6784\u5f02\u5e38",
     loading: "\u52a0\u8f7d\u4e2d...",
     cached: "\u5df2\u4ece\u7f13\u5b58\u52a0\u8f7d",
@@ -140,7 +149,7 @@ function getApiHeaders(token = "") {
       if (value !== "" && value !== undefined && value !== null) url.searchParams.set(key, value);
     });
     GM_xmlhttpRequest({
-      method: "GET",
+      method: path === "/api/v1/sessions" ? "POST" : "GET",
       url: url.href,
       headers,
       anonymous: false,
@@ -163,9 +172,6 @@ function getApiHeaders(token = "") {
     pageState.status.hidden = !text;
   };
 
-  const isPageLoggedIn = () => Boolean(
-    document.querySelector('a[href^="/users/"], a[href="/users/edit"], a[href="/logout"], form[action="/logout"], .navbar-item[href^="/users/"]'),
-  );
 
   const syncControls = (resetPeriod = false) => {
     const top = isTop();
@@ -191,7 +197,8 @@ function getApiHeaders(token = "") {
       };
     }
 
-    if (!isPageLoggedIn()) throw new Error("NEED_LOGIN");
+    const token = pageState.token.value.trim();
+    if (!token) throw new Error("NO_TOKEN");
     return {
       path: "/api/v1/movies/top",
       query: {
@@ -203,7 +210,7 @@ function getApiHeaders(token = "") {
         page: "1",
         limit: "50",
       },
-      headers: getApiHeaders(),
+      headers: getApiHeaders(token),
     };
   };
 
@@ -262,7 +269,7 @@ function getApiHeaders(token = "") {
       setStatus(T.loaded, "is-success");
     } catch (err) {
       pageState.list.innerHTML = "";
-      if (err?.message === "NEED_LOGIN") return setStatus(T.needLogin, "is-warning");
+      if (err?.message === "NO_TOKEN") return setStatus(T.noToken, "is-warning");
       if (err?.message === "BAD_SHAPE") return setStatus(T.badShape, "is-danger");
       if (err?.status === 401 || err?.status === 403) return setStatus(T.badToken, "is-danger");
       if (typeof err?.status === "number") return setStatus(`HTTP ${err.status}: ${(err.responseText || "").slice(0, 200)}`, "is-danger");
@@ -270,6 +277,38 @@ function getApiHeaders(token = "") {
     }
   };
 
+  const loginAndSaveToken = async (username, password) => {
+    try {
+      setStatus(T.loading, "is-info");
+      const res = await request({
+        path: "/api/v1/sessions",
+        query: {
+          username,
+          password,
+          device_uuid: "04b9534d-5118-53de-9f87-2ddded77111e",
+          device_name: "Chrome",
+          device_model: "Browser",
+          platform: "web",
+          system_version: "1.0",
+          app_version: "official",
+          app_version_number: "1.9.29",
+          app_channel: "official",
+        },
+        headers: getApiHeaders(),
+      });
+      const data = JSON.parse(res.responseText || "{}");
+      const token = data?.data?.token;
+      if (!token) throw new Error(data?.error || T.badShape);
+      GM_setValue(TOKEN_KEY, token);
+      GM_setValue("jdb_rank_username", username);
+      pageState.token.value = token;
+      setStatus(T.tokenGenerated, "is-success");
+      loadRankings(true);
+    } catch (err) {
+      const message = err?.status ? `HTTP ${err.status}: ${(err.responseText || "").slice(0, 200)}` : String(err?.message || err);
+      setStatus(T.tokenFailed + message, "is-danger");
+    }
+  };
 
   const renderPageHTML = () => `<div class="x-rankings-page container">
     <h1 class="title is-4">${T.title}</h1>
@@ -279,6 +318,11 @@ function getApiHeaders(token = "") {
       <label class="x-rank-control x-rank-top"><span>${T.type}</span><span class="select is-small"><select data-rank-field="type"><option value="">${T.def}</option><option value="0">0 ${T.coded}</option><option value="1">1 ${T.uncoded}</option><option value="all">all ${T.all}</option></select></span></label>
       <label class="x-rank-control x-rank-top"><span>${T.startRank}</span><span class="select is-small"><select data-rank-field="startRank"><option value="1">1</option><option value="51">51</option><option value="101">101</option><option value="151">151</option><option value="201">201</option></select></span></label>
       <label class="x-rank-control x-rank-top"><span>${T.ignoreWatched}</span><span class="select is-small"><select data-rank-field="ignoreWatched"><option value="false">false</option><option value="true">true</option></select></span></label>
+      <label class="x-rank-control x-rank-top"><span>${T.username}</span><input class="input is-small" data-rank-field="username" type="text"></label>
+      <label class="x-rank-control x-rank-top"><span>${T.password}</span><input class="input is-small" data-rank-field="password" type="password"></label>
+      <button class="button is-small x-rank-top" data-rank-action="loginToken">${T.genToken}</button>
+      <label class="x-rank-control x-rank-top"><span>token</span><input class="input is-small" data-rank-field="token" type="password" placeholder="Bearer token"></label>
+      <button class="button is-small x-rank-top" data-rank-action="saveToken">${T.saveToken}</button>
       <label class="x-rank-control x-rank-playback"><span>${T.filter}</span><span class="select is-small"><select data-rank-field="filterBy"><option value="all">all ${T.all}</option><option value="high_score">high_score ${T.highScore}</option></select></span></label>
       <button class="button is-small is-link" data-rank-action="load">${T.load}</button>
       <button class="button is-small" data-rank-action="refresh">${T.refresh}</button>
@@ -297,6 +341,9 @@ function getApiHeaders(token = "") {
       type: field("type"),
       startRank: field("startRank"),
       ignoreWatched: field("ignoreWatched"),
+      username: field("username"),
+      password: field("password"),
+      token: field("token"),
       filterBy: field("filterBy"),
       status: root.querySelector(".x-rank-status"),
       list: root.querySelector(".movie-list"),
@@ -304,6 +351,8 @@ function getApiHeaders(token = "") {
       playbackControls: root.querySelectorAll(".x-rank-playback"),
     };
 
+    pageState.username.value = GM_getValue("jdb_rank_username", "");
+    pageState.token.value = GM_getValue(TOKEN_KEY, "");
     {
       const params = new URLSearchParams(location.search);
       const initialType = typeFromNav || params.get("type") || "playback";
@@ -318,6 +367,16 @@ function getApiHeaders(token = "") {
     });
     action("load").addEventListener("click", () => loadRankings());
     action("refresh").addEventListener("click", () => loadRankings(true));
+    action("saveToken").addEventListener("click", () => {
+      GM_setValue(TOKEN_KEY, pageState.token.value.trim());
+      setStatus(T.tokenSaved, "is-success");
+    });
+    action("loginToken").addEventListener("click", () => {
+      const username = pageState.username.value.trim();
+      const password = pageState.password.value;
+      if (!username || !password) return setStatus(T.inputAccount, "is-warning");
+      loginAndSaveToken(username, password);
+    });
     loadRankings();
   };
 
@@ -339,14 +398,25 @@ function getApiHeaders(token = "") {
       : `<a class="navbar-link x-rankings-trigger" href="${VOID}">${T.title}</a><div class="navbar-dropdown"><a class="navbar-item" data-rank-nav="top">TOP250</a><a class="navbar-item" data-rank-nav="playback">${T.playback}</a></div>`;
     wrap.addEventListener("click", (e) => {
       const target = e.target.closest("[data-rank-nav]");
-      if (!target) return;
+      if (!target) {
+        if (e.target.closest(".x-rankings-trigger")) {
+          e.preventDefault();
+          wrap.classList.toggle("is-active");
+        }
+        return;
+      }
       e.preventDefault();
+      wrap.classList.remove("is-active");
       const type = target.dataset.rankNav;
       history.pushState(null, "", `/?x_rankings=1&type=${type}`);
       window.renderRankingsPage(type);
     });
     navList.insertBefore(wrap, settings || null);
   };
+
+  document.addEventListener("click", ({ target }) => {
+    if (!target.closest(".x-rankings-nav")) document.querySelector(".x-rankings-nav.is-active")?.classList.remove("is-active");
+  });
 
   insertNav();
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", insertNav, { once: true });
