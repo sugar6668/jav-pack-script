@@ -456,7 +456,7 @@ const offline = async ({ options, magnets, onstart, onprogress, onfinally }, cur
 
     Grant.notify(res);
     Util.setFavicon(res);
-    setTimeout(() => unsafeWindow[MATCH_API]?.(), MATCH_DELAY);
+    setTimeout(() => unsafeWindow[MATCH_API]?.(true), MATCH_DELAY);
   };
 
   const onclick = (e) => {
