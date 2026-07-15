@@ -1,16 +1,21 @@
 // ==UserScript==
 // @name            JavDB.filter
 // @namespace       JavDB.filter@blc
-// @version         0.0.3
+// @version         0.0.4
 // @author          blc
 // @description     评分筛选与性癖净化
 // @match           https://javdb.com/*
 // @exclude         https://javdb.com/v/*
 // @icon            https://javdb.com/favicon.ico
 // @run-at          document-end
+// @grant           GM_getValue
+// @grant           GM_setValue
 // ==/UserScript==
 
 (function () {
+  const MANUAL_BLOCK_STORAGE_KEY = "manualBlockedMovies";
+  const MENU_ID = "javdb-filter-menu";
+
   const SCORE_CONFIG = {
     lowOpacity: "10%",
     weakOpacity: "30%",
@@ -50,6 +55,26 @@
   const idsToBlock = lowerList(PURIFY_CONFIG.blockedIDs);
   const titlesToBlock = lowerList(PURIFY_CONFIG.blockedTitleKeywords);
   const tagsToBlock = lowerList(PURIFY_CONFIG.blockedTags);
+  const loadManualBlocks = () => {
+    try {
+      const saved = typeof GM_getValue === "function"
+        ? GM_getValue(MANUAL_BLOCK_STORAGE_KEY, [])
+        : JSON.parse(localStorage.getItem(MANUAL_BLOCK_STORAGE_KEY) || "[]");
+      return new Set(Array.isArray(saved) ? saved : []);
+    } catch (_) {
+      return new Set();
+    }
+  };
+  const manuallyBlockedMovies = loadManualBlocks();
+
+  const saveManualBlocks = () => {
+    const value = [...manuallyBlockedMovies];
+    if (typeof GM_setValue === "function") {
+      GM_setValue(MANUAL_BLOCK_STORAGE_KEY, value);
+    } else {
+      localStorage.setItem(MANUAL_BLOCK_STORAGE_KEY, JSON.stringify(value));
+    }
+  };
 
   const getText = (node, selector) => node.querySelector(selector)?.textContent.trim() || "";
 
@@ -66,6 +91,14 @@
       meta,
       fullText: `${code} ${title}`,
     };
+  };
+
+  const getMovieKey = (item, details = parseCard(item)) => {
+    const href = item.matches("a[href*='/v/']")
+      ? item.href
+      : item.querySelector("a[href*='/v/']")?.href;
+    const movieId = href && new URL(href, location.origin).pathname.match(/^\/v\/([^/?#]+)/)?.[1];
+    return movieId ? `id:${movieId.toLowerCase()}` : `code:${details.code.toLowerCase()}`;
   };
 
   const parseScore = (text) => {
@@ -114,6 +147,10 @@
   };
 
   const applyPurify = (item, details) => {
+    if (manuallyBlockedMovies.has(getMovieKey(item, details))) {
+      item.remove();
+      return true;
+    }
     if (item.dataset.purifyProcessed === "1") return false;
     item.dataset.purifyProcessed = "1";
     if (!shouldRemove(details)) return false;
@@ -130,6 +167,56 @@
     });
   };
 
+  const closeBlockMenu = () => document.getElementById(MENU_ID)?.remove();
+
+  const showBlockMenu = (event, item) => {
+    closeBlockMenu();
+    const details = parseCard(item);
+    const movieKey = getMovieKey(item, details);
+    if (!movieKey || movieKey === "code:") return;
+
+    const menu = document.createElement("div");
+    menu.id = MENU_ID;
+    menu.setAttribute("role", "dialog");
+    menu.innerHTML = `
+      <div class="x-filter-menu-title">屏蔽这部影片？</div>
+      <div class="x-filter-menu-text">以后在瀑布流中不会再显示。</div>
+      <div class="x-filter-menu-actions">
+        <button type="button" class="button is-small is-danger">屏蔽</button>
+        <button type="button" class="button is-small">取消</button>
+      </div>`;
+    Object.assign(menu.style, {
+      position: "fixed", zIndex: "99999", left: `${Math.max(8, Math.min(event.clientX, window.innerWidth - 230))}px`,
+      top: `${Math.max(8, Math.min(event.clientY, window.innerHeight - 120))}px`, width: "220px", padding: "12px",
+      background: "#fff", border: "1px solid #dbdbdb", borderRadius: "6px", boxShadow: "0 8px 20px rgba(10, 10, 10, .18)",
+      color: "#363636", fontSize: "13px",
+    });
+    menu.querySelector(".x-filter-menu-title").style.fontWeight = "600";
+    Object.assign(menu.querySelector(".x-filter-menu-text").style, { marginTop: "4px", color: "#7a7a7a" });
+    Object.assign(menu.querySelector(".x-filter-menu-actions").style, { display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "12px" });
+    const [blockButton, cancelButton] = menu.querySelectorAll("button");
+    blockButton.addEventListener("click", () => {
+      manuallyBlockedMovies.add(movieKey);
+      saveManualBlocks();
+      item.remove();
+      closeBlockMenu();
+    });
+    cancelButton.addEventListener("click", closeBlockMenu);
+    document.body.append(menu);
+  };
+
   processCards(document.querySelectorAll(".movie-list .item"));
   window.addEventListener("JavDB.scroll", ({ detail }) => processCards(detail || []));
+  document.addEventListener("contextmenu", (event) => {
+    const item = event.target.closest(".movie-list .item");
+    if (!item) return;
+    event.preventDefault();
+    showBlockMenu(event, item);
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (!event.target.closest(`#${MENU_ID}`)) closeBlockMenu();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeBlockMenu();
+  });
 })();
