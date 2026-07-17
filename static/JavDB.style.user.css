@@ -959,6 +959,7 @@ br + .title {
       margin: 0;
       padding-left: 2px;
       display: flex;
+      align-items: flex-start;
       gap: 4px;
     }
 
@@ -999,6 +1000,8 @@ br + .title {
       position: relative;
       display: inline-flex;
       align-items: stretch;
+      flex: 0 0 auto;
+      align-self: flex-start;
       margin: 0 !important;
 
       .button {
