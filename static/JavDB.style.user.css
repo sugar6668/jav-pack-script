@@ -998,6 +998,7 @@ br + .title {
     /* 刮削归档采用分段按钮：主按钮与下拉按钮视觉上是一个整体。 */
     .x-match-archive-dropdown {
       position: relative;
+      top: -1px;
       display: inline-flex;
       align-items: stretch;
       flex: 0 0 auto;
