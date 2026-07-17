@@ -86,21 +86,44 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     return ["番号", prefix, title || this.sanitizeName(details.code || "未命名")];
   }
 
+  static buildActorTargetDir(details = {}) {
+    const actor = this.sanitizeName(details.actors?.[0] || "");
+    // 一部影片没有演员资料，此时保留原有番号归档作为可靠的后备路径。
+    return actor ? ["演员", actor] : this.buildTargetDir(details);
+  }
+
+  static buildArchiveDir(details = {}, mode = "actor") {
+    return mode === "code" ? this.buildTargetDir(details) : this.buildActorTargetDir(details);
+  }
+
   static buildRename(details = {}, files = []) {
     const title = this.sanitizeName([details.code, details.title].filter(Boolean).join(" "));
     const hasZh = files.some((file) => this.zhReg.test(file.n));
     return `${title || this.sanitizeName(details.code || "未命名")}${hasZh ? " [中文]" : ""}`;
   }
 
+  static buildPreview(details = {}, file = {}, mode = "rename") {
+    const normalized = this.normalizeFile(file);
+    const rename = this.buildRename(details, [normalized]);
+    const lines = [];
+    if (mode !== "rename") lines.push(`目录：${this.buildArchiveDir(details, mode).join("/")}`);
+    lines.push(`主文件：${rename}.${normalized.ico}`);
+    if (mode !== "rename") lines.push("同目录字幕会一并移动并按相同规则命名");
+    return lines.join("\n");
+  }
+
   static renderItem(item, details = {}) {
     const file = this.normalizeFile(item);
     const path = this.formatDirectory(file);
-    const targetDir = this.buildTargetDir(details).join("/");
     const tip = [file.n, file.s, path].filter(Boolean).join("\n");
     const safeName = this.escapeHtml(file.n);
     const safePath = this.escapeHtml(path);
     const safeTip = this.escapeHtml(tip);
-    const safeDir = this.escapeHtml(targetDir);
+    const safeActorDir = this.escapeHtml(this.buildArchiveDir(details, "actor").join("/"));
+    const safeCodeDir = this.escapeHtml(this.buildArchiveDir(details, "code").join("/"));
+    const safeActorPreview = this.escapeHtml(this.buildPreview(details, file, "actor"));
+    const safeCodePreview = this.escapeHtml(this.buildPreview(details, file, "code"));
+    const safeRenamePreview = this.escapeHtml(this.buildPreview(details, file));
     const coverClass = file.hasCover ? "is-success" : "is-info";
     const coverText = file.hasCover ? "已有封面" : "传封面";
     const coverDisabled = file.hasCover ? " disabled" : "";
@@ -118,8 +141,16 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           <span class="x-match-dir">${safePath}</span>
         </a>
         <div class="buttons">
-          <button class="button is-small is-primary x-match-action" data-action="archive" data-dir="${safeDir}" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">刮削归档</button>
-          <button class="button is-small is-link x-match-action" data-action="rename" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">重命名</button>
+          <div class="dropdown x-match-archive-dropdown">
+            <div class="dropdown-trigger">
+              <button class="button is-small is-primary x-match-action" title="${safeActorPreview}" data-action="archive" data-archive-mode="actor" data-dir="${safeActorDir}" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">刮削归档</button>
+              <button class="button is-small is-primary x-match-archive-toggle" type="button" aria-haspopup="true" aria-label="选择归档方式">⌄</button>
+            </div>
+            <div class="dropdown-menu" role="menu"><div class="dropdown-content">
+              <button class="dropdown-item x-match-action" title="${safeCodePreview}" data-action="archive" data-archive-mode="code" data-dir="${safeCodeDir}" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">按番号归档</button>
+            </div></div>
+          </div>
+          <button class="button is-small is-link x-match-action" title="${safeRenamePreview}" data-action="rename" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">重命名</button>
           <button class="button is-small ${coverClass} x-match-action x-match-cover" data-action="cover" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}"${coverDisabled}>${coverText}</button>
           <button class="button is-small is-danger is-light x-match-action" data-action="delv" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}">删除文件</button>
           <button class="button is-small is-danger x-match-action" data-action="delf" data-cid="${this.escapeHtml(file.cid || "")}">删除文件夹</button>
@@ -183,6 +214,14 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     root.dataset.matchConsoleBound = "1";
 
     root.addEventListener("click", async (e) => {
+      const toggle = e.target.closest(".x-match-archive-toggle");
+      if (toggle && root.contains(toggle)) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggle.closest(".x-match-archive-dropdown")?.classList.toggle("is-active");
+        return;
+      }
+
       const btn = e.target.closest(".x-match-action");
       if (!btn || !root.contains(btn)) return;
 
@@ -199,9 +238,17 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       };
       const action = btn.dataset.action;
       const oldText = btn.textContent;
+      const useSpinner = action === "archive";
+
+      btn.closest(".x-match-archive-dropdown")?.classList.remove("is-active");
 
       btn.dataset.busy = "1";
-      btn.classList.add("is-loading");
+      if (useSpinner) {
+        btn.classList.add("is-loading");
+      } else {
+        btn.textContent = "执行中..";
+        btn.style.opacity = "0.5";
+      }
 
       try {
         if (action === "archive") {
@@ -243,7 +290,8 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         grant?.notify?.({ status: "error", icon: "error", msg: err?.message || "操作失败" });
         btn.textContent = oldText;
       } finally {
-        btn.classList.remove("is-loading");
+        if (useSpinner) btn.classList.remove("is-loading");
+        btn.style.opacity = "1";
         delete btn.dataset.busy;
       }
     }, true);

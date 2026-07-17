@@ -193,10 +193,15 @@ const getPageDetails = (dom = document) => {
   const label = titleNode?.querySelector("strong")?.textContent.trim() || "";
   const currentTitle = titleNode?.querySelector(".origin-title, .current-title")?.textContent.trim() || "";
   const title = `${label}${currentTitle}`.replace(code, "").trim();
+  // 详情页的演员链接位于 movie-panel-info 内；按页面展示顺序取首位演员作为默认归档目录。
+  const actors = [...dom.querySelectorAll('.movie-panel-info a[href*="/actors/"]')]
+    .map((node) => node.textContent.trim())
+    .filter((name, index, names) => name && names.indexOf(name) === index);
 
   return {
     ...Util.codeParse(code),
     title,
+    actors,
     cover: dom.querySelector(".video-cover")?.src || "",
   };
 };
