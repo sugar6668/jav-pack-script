@@ -141,14 +141,14 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           <span class="x-match-dir">${safePath}</span>
         </a>
         <div class="buttons">
-          <div class="dropdown x-match-archive-dropdown">
-            <div class="dropdown-trigger">
-              <button class="button is-small is-primary x-match-action" title="${safeActorPreview}" data-action="archive" data-archive-mode="actor" data-dir="${safeActorDir}" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">刮削归档</button>
-              <button class="button is-small is-primary x-match-archive-toggle" type="button" aria-haspopup="true" aria-label="选择归档方式">⌄</button>
+          <div class="x-match-archive-dropdown">
+            <button class="button is-small is-primary x-match-action x-match-archive-main" title="${safeActorPreview}" data-action="archive" data-archive-mode="actor" data-dir="${safeActorDir}" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">刮削归档</button>
+            <button class="button is-small is-primary x-match-archive-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="选择归档方式">
+              <svg class="x-match-archive-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <div class="x-match-archive-menu" role="menu">
+              <button class="button is-small is-primary x-match-action x-match-archive-code" title="${safeCodePreview}" data-action="archive" data-archive-mode="code" data-dir="${safeCodeDir}" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">按番号归档</button>
             </div>
-            <div class="dropdown-menu" role="menu"><div class="dropdown-content">
-              <button class="dropdown-item x-match-action" title="${safeCodePreview}" data-action="archive" data-archive-mode="code" data-dir="${safeCodeDir}" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">按番号归档</button>
-            </div></div>
           </div>
           <button class="button is-small is-link x-match-action" title="${safeRenamePreview}" data-action="rename" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">重命名</button>
           <button class="button is-small ${coverClass} x-match-action x-match-cover" data-action="cover" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}"${coverDisabled}>${coverText}</button>
@@ -218,7 +218,9 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       if (toggle && root.contains(toggle)) {
         e.preventDefault();
         e.stopPropagation();
-        toggle.closest(".x-match-archive-dropdown")?.classList.toggle("is-active");
+        const dropdown = toggle.closest(".x-match-archive-dropdown");
+        const isActive = dropdown?.classList.toggle("is-active");
+        toggle.setAttribute("aria-expanded", String(Boolean(isActive)));
         return;
       }
 
@@ -240,7 +242,9 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       const oldText = btn.textContent;
       const useSpinner = action === "archive";
 
-      btn.closest(".x-match-archive-dropdown")?.classList.remove("is-active");
+      const dropdown = btn.closest(".x-match-archive-dropdown");
+      dropdown?.classList.remove("is-active");
+      dropdown?.querySelector(".x-match-archive-toggle")?.setAttribute("aria-expanded", "false");
 
       btn.dataset.busy = "1";
       if (useSpinner) {
