@@ -339,7 +339,7 @@ const getDetails = (dom = document) => {
 };
 
 const isUncensored = (dom = document) => {
-  return dom.querySelector(".title.is-4").textContent.includes("無碼");
+  return /无码|無碼/i.test(dom.querySelector(".title.is-4")?.textContent || "");
 };
 
 const renderAction = ({ color, index, idx, desc, name }) => {
@@ -366,7 +366,6 @@ const parseMagnet = (node) => {
     url: node.querySelector(".magnet-name a")?.href?.split("&")[0].toLowerCase(),
     crack: !!node.querySelector(".tag.is-info") || Magnet.crackReg.test(name),
     zh: !!node.querySelector(".tag.is-warning") || Magnet.zhReg.test(name),
-    uncensored: /无码|無碼|uncensored/i.test(name),
     size: transToByte(meta.split(",")[0]),
     meta,
     name,
@@ -378,10 +377,7 @@ const getMagnets = (dom = document) => {
 };
 
 const checkCrack = (magnets, uncensored) => {
-  return magnets.map((item) => {
-    const isUncensored = uncensored || item.uncensored;
-    return { ...item, uncensored: isUncensored, crack: isUncensored ? false : item.crack };
-  });
+  return magnets.map((item) => ({ ...item, uncensored: Boolean(uncensored) }));
 };
 
 const offline = async ({ options, magnets, onstart, onprogress, onfinally }, currIdx = 0) => {

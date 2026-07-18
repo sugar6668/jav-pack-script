@@ -3,8 +3,7 @@
  */
 window.JavPackMatch115Console = class JavPackMatch115Console {
   static zhReg = /中文|中字|字幕|\[[a-z]?hdc[a-z]?\]|[-_\s]+(uc|c|ch|cu|zh)(?![a-z])/i;
-  static crackReg = /流出|破解|解密版|破[\u4E00-\u9FC6]版/i;
-  static uncensoredReg = /无码|無碼|uncensored/i;
+  static crackReg = /无码|無碼|流出|破解|解密版|uncensored|破[\u4E00-\u9FC6]版|[-_\s]+(cu|u|uc)(?![a-z])/i;
 
   static escapeHtml(value = "") {
     return String(value)
@@ -106,7 +105,8 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     const title = this.sanitizeName(details.title || "");
     const hasZh = files.some((file) => this.zhReg.test(file.n));
     const hasCrack = files.some((file) => this.crackReg.test(file.n));
-    const isUncensored = Boolean(details.isUncensored) || files.some((file) => this.uncensoredReg.test(file.n));
+    // 无码标签仅由当前 JavDB 番号的页面属性决定，不能由资源文件名中的 -U、无码、破解等字样推断。
+    const isUncensored = Boolean(details.isUncensored);
     const tags = [hasZh && "[中文]", hasCrack && "[破解]", isUncensored && "[无码]"].filter(Boolean).join("");
     // 标签统一位于番号和作品名之间，例如：LUXU-123 [中文][破解][无码] 作品名。
     return [code, tags, title].filter(Boolean).join(" ");
