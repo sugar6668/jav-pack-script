@@ -314,6 +314,7 @@ const getPageDetails = (dom = document) => {
       if (next.length > 0) MatchCache.set(code, next);
       else MatchCache.del(code);
     },
+    invalidateCache: () => MatchCache.del(code),
     refresh: () => matcher(true),
   });
   window.addEventListener("beforeunload", () => CHANNEL.postMessage(code));

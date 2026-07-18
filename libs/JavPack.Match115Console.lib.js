@@ -88,8 +88,11 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
 
   static buildActorTargetDir(details = {}) {
     const actor = this.sanitizeName(details.actors?.[0] || "");
+    const title = this.sanitizeName([details.code, details.title].filter(Boolean).join(" "))
+      || this.sanitizeName(details.code || "未命名");
     // 一部影片没有演员资料，此时保留原有番号归档作为可靠的后备路径。
-    return actor ? ["演员", actor] : this.buildTargetDir(details);
+    // 演员目录下还要以作品名分目录，避免同一演员的所有作品直接混在一起。
+    return actor ? ["演员", actor, title] : this.buildTargetDir(details);
   }
 
   static buildArchiveDir(details = {}, mode = "actor") {
@@ -271,6 +274,9 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
             coverBtn.textContent = "已有封面";
             coverBtn.setAttribute("disabled", "");
           }
+          // 归档改变了文件夹和文件名；旧匹配缓存会让页面刷新后仍显示归档前的信息。
+          options.invalidateCache?.();
+          await options.refresh?.().catch((err) => console.warn("[JavPackMatch115Console.refresh]", err?.message));
         } else if (action === "rename") {
           await this.renameMatched({ req115, item, details });
           const nameNode = btn.closest(".zymatch-item")?.querySelector(".x-match-name");
