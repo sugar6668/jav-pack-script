@@ -315,9 +315,10 @@ class Req115 extends Drive115 {
     if (labels.length) return this.filesBatchLabel(files.map((it) => it.fid).toString(), labels.toString());
   }
 
-  static handleRename(files, cid, { rename, renameTxt, zh, crack }) {
+  static handleRename(files, cid, { rename, renameTxt, zh, crack, uncensored }) {
     rename = rename.replaceAll("$zh", zh ? renameTxt.zh : "");
     rename = rename.replaceAll("$crack", crack ? renameTxt.crack : "");
+    rename = rename.replaceAll("$uncensored", uncensored ? renameTxt.uncensored : "");
     rename = rename.split("$sep").filter(Boolean).join(renameTxt.sep);
     rename = rename.trim();
 
@@ -362,7 +363,7 @@ class Req115 extends Drive115 {
   }
 
   static async handleOffline(
-    { dir, regex, codes, verifyOptions, code, rename, renameTxt, tags, clean, cover },
+    { dir, regex, codes, verifyOptions, code, rename, renameTxt, tags, clean, cover, uncensored },
     magnets,
   ) {
     const res = { status: "error", msg: `获取目录失败: ${dir.join("/")}` };
@@ -370,7 +371,7 @@ class Req115 extends Drive115 {
     if (!cid) return res;
 
     for (let index = 0, { length } = magnets; index < length; index++) {
-      const { url, zh, crack } = magnets[index];
+      const { url, zh, crack, uncensored: magnetUncensored } = magnets[index];
       const { state, error_msg, errcode, info_hash } = await this.lixianAddTaskUrl(url, cid);
 
       if (!state) {
@@ -400,7 +401,7 @@ class Req115 extends Drive115 {
 
       if (tags.length) this.handleTags(videos, tags);
 
-      if (rename) this.handleRename(files, file_id, { rename, renameTxt, zh: zh || srts.length, crack });
+      if (rename) this.handleRename(files, file_id, { rename, renameTxt, zh: zh || srts.length, crack, uncensored: uncensored || magnetUncensored });
 
       if (cover) {
         try {

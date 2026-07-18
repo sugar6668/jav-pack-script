@@ -6,7 +6,7 @@ class Offline {
 
   static defaultColor = "is-info";
 
-  static defaultRename = `\${code} \${zh}\${crack} \${title}`;
+  static defaultRename = `\${code} \${zh}\${crack}\${uncensored} \${title}`;
 
   static defaultOptions = {
     tags: ["genres", "actors"],
@@ -33,6 +33,7 @@ class Offline {
     sep: "-",
     zh: "[中文]",
     crack: "[破解]",
+    uncensored: "[无码]",
   };
 
   static parseVar(txt, params, rep = "") {
@@ -59,6 +60,7 @@ class Offline {
           rename = rename.replaceAll(`\${sep}`, "$sep");
           rename = rename.replaceAll(`\${zh}`, "$zh");
           rename = rename.replaceAll(`\${crack}`, "$crack");
+          rename = rename.replaceAll(`\${uncensored}`, "$uncensored");
           if (!rename.includes(`\${code}`)) rename = `\${code} ${rename}`;
         }
 
@@ -109,6 +111,7 @@ class Offline {
       codes,
       regex,
       code: details.code,
+      uncensored: Boolean(details.uncensored),
       cover: options.cover ? cover : "",
       rename: this.parseVar(rename, details),
       tags: options.tags.flatMap((key) => details[key]).filter(Boolean),

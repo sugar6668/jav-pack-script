@@ -290,6 +290,7 @@ const getDetails = (dom = document) => {
   const origin = titleNode.querySelector(".origin-title");
   const current = titleNode.querySelector(".current-title");
   info.title = `${label}${(origin ?? current).textContent}`.replace(code, "").trim();
+  info.uncensored = /无码|無碼/i.test(titleNode.textContent || "");
 
   infoNode.querySelectorAll(":scope > .panel-block").forEach((item) => {
     const label = item.querySelector("strong")?.textContent.trim();
@@ -365,6 +366,7 @@ const parseMagnet = (node) => {
     url: node.querySelector(".magnet-name a")?.href?.split("&")[0].toLowerCase(),
     crack: !!node.querySelector(".tag.is-info") || Magnet.crackReg.test(name),
     zh: !!node.querySelector(".tag.is-warning") || Magnet.zhReg.test(name),
+    uncensored: /无码|無碼|uncensored/i.test(name),
     size: transToByte(meta.split(",")[0]),
     meta,
     name,
@@ -376,7 +378,10 @@ const getMagnets = (dom = document) => {
 };
 
 const checkCrack = (magnets, uncensored) => {
-  return uncensored ? magnets.map((item) => ({ ...item, crack: false })) : magnets;
+  return magnets.map((item) => {
+    const isUncensored = uncensored || item.uncensored;
+    return { ...item, uncensored: isUncensored, crack: isUncensored ? false : item.crack };
+  });
 };
 
 const offline = async ({ options, magnets, onstart, onprogress, onfinally }, currIdx = 0) => {
