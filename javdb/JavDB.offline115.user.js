@@ -127,6 +127,7 @@ const setConfig = async (e) => {
 };
 
 const TARGET_CLASS = "x-offline";
+const CRACK_REG = /无码破解|無碼破解|流出|破解|解密版|uncensored|破[\u4E00-\u9FC6]版|[-_\s]+(cu|u|uc)(?![a-z])/i;
 const LOAD_CLASS = "is-loading";
 
 const MATCH_API = "reMatch";
@@ -364,7 +365,8 @@ const parseMagnet = (node) => {
   const meta = node.querySelector(".meta")?.textContent.trim() ?? "";
   return {
     url: node.querySelector(".magnet-name a")?.href?.split("&")[0].toLowerCase(),
-    crack: !!node.querySelector(".tag.is-info") || Magnet.crackReg.test(name),
+    // “无码/無碼”本身是番号属性，不是破解标记；仅识别明确的破解关键词。
+    crack: CRACK_REG.test(name),
     zh: !!node.querySelector(".tag.is-warning") || Magnet.zhReg.test(name),
     size: transToByte(meta.split(",")[0]),
     meta,

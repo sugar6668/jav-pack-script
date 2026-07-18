@@ -3,7 +3,7 @@
  */
 window.JavPackMatch115Console = class JavPackMatch115Console {
   static zhReg = /中文|中字|字幕|\[[a-z]?hdc[a-z]?\]|[-_\s]+(uc|c|ch|cu|zh)(?![a-z])/i;
-  static crackReg = /无码|無碼|流出|破解|解密版|uncensored|破[\u4E00-\u9FC6]版|[-_\s]+(cu|u|uc)(?![a-z])/i;
+  static crackReg = /无码破解|無碼破解|流出|破解|解密版|uncensored|破[\u4E00-\u9FC6]版|[-_\s]+(cu|u|uc)(?![a-z])/i;
 
   static escapeHtml(value = "") {
     return String(value)
@@ -301,7 +301,14 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         } else if (action === "delv" || action === "delf") {
           await this.deleteMatched({ req115, item, action });
           options.removeFromCache?.(item, action);
-          btn.closest(".zymatch-item")?.remove();
+          if (action === "delf") {
+            // 删除文件夹会同时删除该目录下的所有匹配项；同步移除整组行，避免只消失当前行而显示旧结果。
+            root.querySelectorAll(".zymatch-item").forEach((node) => {
+              if (String(node.dataset.cid) === String(item.cid)) node.remove();
+            });
+          } else {
+            btn.closest(".zymatch-item")?.remove();
+          }
         }
 
         grant?.notify?.({ status: "success", icon: "success", msg: "操作成功" });
