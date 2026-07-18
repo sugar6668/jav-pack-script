@@ -44,7 +44,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
   }
 
   static hasCoverFile(files = []) {
-    return files.some((file) => /cover/i.test(file?.n || "") && /\.(jpe?g|png|webp|gif)$/i.test(file?.n || ""));
+    return files.some((file) => /\.cover\.(jpe?g|png|webp|gif)$/i.test(file?.n || ""));
   }
 
   static getCoverFilename(details = {}) {
@@ -183,7 +183,11 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       crack: false,
     });
 
-    if (details.cover) await this.uploadCover({ req115, cid: targetCid, details }).catch((err) => console.warn("[JavPackMatch115Console.handleCover]", err?.message));
+    // 仅把“*.cover.图片扩展名”视为已存在的封面；目标目录已有该封面时不再上传，避免重复封面文件。
+    const { data: targetFiles = [] } = await req115.files(targetCid, { limit: 1150 }).catch(() => ({ data: [] }));
+    if (details.cover && !this.hasCoverFile(targetFiles)) {
+      await this.uploadCover({ req115, cid: targetCid, details }).catch((err) => console.warn("[JavPackMatch115Console.handleCover]", err?.message));
+    }
 
     return targetCid;
   }
