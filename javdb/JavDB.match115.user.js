@@ -202,6 +202,7 @@ const getPageDetails = (dom = document) => {
     ...Util.codeParse(code),
     title,
     actors,
+    isUncensored: /无码|無碼/i.test(titleNode?.textContent || ""),
     cover: dom.querySelector(".video-cover")?.src || "",
   };
 };

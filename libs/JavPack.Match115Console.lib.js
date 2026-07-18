@@ -2,7 +2,9 @@
  * @require JavPack.Req115.lib.js
  */
 window.JavPackMatch115Console = class JavPackMatch115Console {
-  static zhReg = /中字|字幕|\b(chs|cht|sub)\b|[-_]c(?=\.[a-z0-9]+$|$)/i;
+  static zhReg = /中文|中字|字幕|\[[a-z]?hdc[a-z]?\]|[-_\s]+(uc|c|ch|cu|zh)(?![a-z])/i;
+  static crackReg = /流出|破解|解密版|破[\u4E00-\u9FC6]版/i;
+  static uncensoredReg = /无码|無碼|uncensored/i;
 
   static escapeHtml(value = "") {
     return String(value)
@@ -100,9 +102,14 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
   }
 
   static buildRename(details = {}, files = []) {
-    const title = this.sanitizeName([details.code, details.title].filter(Boolean).join(" "));
+    const code = this.sanitizeName(details.code || "未命名");
+    const title = this.sanitizeName(details.title || "");
     const hasZh = files.some((file) => this.zhReg.test(file.n));
-    return `${title || this.sanitizeName(details.code || "未命名")}${hasZh ? " [中文]" : ""}`;
+    const hasCrack = files.some((file) => this.crackReg.test(file.n));
+    const isUncensored = Boolean(details.isUncensored) || files.some((file) => this.uncensoredReg.test(file.n));
+    const tags = [hasZh && "[中文]", hasCrack && "[破解]", isUncensored && "[无码]"].filter(Boolean).join("");
+    // 标签统一位于番号和作品名之间，例如：LUXU-123 [中文][破解][无码] 作品名。
+    return [code, tags, title].filter(Boolean).join(" ");
   }
 
   static buildPreview(details = {}, file = {}, mode = "rename") {
