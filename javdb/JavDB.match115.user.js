@@ -482,6 +482,20 @@ const getPageDetails = (dom = document) => {
   matchQueue(movieList);
 
   window.addEventListener("JavDB.scroll", ({ detail }) => matchQueue(detail));
+  // Rankings and other in-page modules can create cards before this userscript
+  // has attached its custom-event listener.  Observe additions as a durable
+  // fallback so every normal `.movie-list .item` gets the same match UI.
+  const matchDynamicCards = (nodes) => {
+    const cards = [];
+    nodes.forEach((node) => {
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      if (node.matches?.(MOVIE_SELECTOR)) cards.push(node);
+      cards.push(...node.querySelectorAll?.(MOVIE_SELECTOR) || []);
+    });
+    if (cards.length) matchQueue(cards);
+  };
+  new MutationObserver((records) => records.forEach((record) => matchDynamicCards(record.addedNodes)))
+    .observe(document.body, { childList: true, subtree: true });
   CHANNEL.onmessage = ({ data }) => matchQueue(document.querySelectorAll(`.${parseCodeCls(data)}`));
 
   const publish = (code) => {

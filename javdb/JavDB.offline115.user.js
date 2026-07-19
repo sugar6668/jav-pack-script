@@ -569,7 +569,12 @@ const offline = async ({ options, magnets, onstart, onprogress, onfinally }, cur
   const insertActions = (actions) => {
     const actionsStr = `<div class="px-2 pt-2 buttons">${actions.map(renderAction).join("")}</div>`;
 
-    const insert = (node) => node.querySelector(COVER_SELECTOR)?.insertAdjacentHTML("beforeend", actionsStr);
+    // The rankings module reserves the cover corner for its rank marker.  It still
+    // emits JavDB.scroll so matching and Quick View initialize normally.
+    const insert = (node) => {
+      if (node.closest("#x-rankings-override-page")) return;
+      node.querySelector(COVER_SELECTOR)?.insertAdjacentHTML("beforeend", actionsStr);
+    };
     const insertList = (nodeList) => nodeList.forEach(insert);
 
     insertList(movieList);

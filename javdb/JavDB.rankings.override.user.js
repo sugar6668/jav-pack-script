@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.rankings.override
 // @namespace       JavDB.rankings.override.local
-// @version         0.0.1
+// @version         0.1.9
 // @description     添加独立榜单入口，以默认样式展示榜单，并支持 match115 匹配
 // @match           https://javdb.com/*
 // @icon            https://javdb.com/favicon.ico
@@ -22,6 +22,8 @@ const TOKEN_KEY = "jdb_rank_token";
 const USER_KEY = "jdb_rank_username";
 const CACHE_PREFIX = "jdb_rank_override_cache_";
 const CACHE_TTL = 30 * 60 * 1000;
+// Time-sensitive charts must not reuse an old response after a period/filter switch.
+const PLAYBACK_CACHE_TTL = 5 * 60 * 1000;
 const PUBLIC_RANK_TYPES = {
   coded: { apiType: "0", label: "\u6709\u7801" },
   uncoded: { apiType: "1", label: "\u65e0\u7801" },
@@ -187,7 +189,8 @@ function getApiHeaders(token) {
 
 function getCache(key) {
   const cache = GM_getValue(key);
-  return cache?.ts && cache?.data && Date.now() - cache.ts <= CACHE_TTL ? cache.data : null;
+  const ttl = key.startsWith(`${CACHE_PREFIX}playback_`) ? PLAYBACK_CACHE_TTL : CACHE_TTL;
+  return cache?.ts && cache?.data && Date.now() - cache.ts <= ttl ? cache.data : null;
 }
 function setCache(key, data) {
   GM_setValue(key, { ts: Date.now(), data });
@@ -448,6 +451,12 @@ function ensureRankStyles() {
   background: var(--bg, #222);
 }
 #x-rankings-override-page .movie-list .item .cover > a { display: block; color: inherit; text-decoration: none; border-bottom: 0; }
+#x-rankings-override-page .movie-list .item .x-rank-badge {
+  position: absolute;
+  top: .35rem;
+  left: .35rem;
+  z-index: 2;
+}
 #x-rankings-override-page .movie-list .item .cover .button,
 #x-rankings-override-page .movie-list .item .cover .tag { text-decoration: none !important; border-bottom: 0 !important; }
 #x-rankings-override-page .movie-list .item .cover img {
@@ -508,7 +517,7 @@ ${renderRankTabs(type)}
   const statusEl = containerEl.querySelector(".x-rank-status");
   const controlsEl = containerEl.querySelector(".x-rank-controls");
   const loadMoreEl = containerEl.querySelector(".x-rank-load-more");
-  const pageState = { page: 1, loading: false, exhausted: false, observer: null };
+  const pageState = { page: 1, loading: false, exhausted: false, observer: null, requestId: 0 };
 
   const setStatus = (text, cls) => {
     statusEl.className = `notification x-rank-status ${cls || ""}`.trim();
@@ -548,19 +557,23 @@ ${renderRankTabs(type)}
     pageState.observer.observe(loadMoreEl);
   };
 
-  const doLoad = async ({ append = false } = {}) => {
+  const doLoad = async ({ append = false, force = false } = {}) => {
     if (append && (!isPageableRank(currentRankType) || pageState.loading || pageState.exhausted)) return;
     const page = append ? pageState.page + 1 : 1;
+    // A delayed response from the former period/type must never repaint the new chart.
+    const requestId = ++pageState.requestId;
+    const requestedType = currentRankType;
     pageState.loading = true;
     if (append) setLoadMoreState("加载中...", true);
     else { setStatus("加载中...", "is-info"); listEl.innerHTML = ""; pageState.page = 1; pageState.exhausted = false; }
     try {
       const controls = readControls(controlsEl);
       const cacheKey = getRankCacheKey(currentRankType, controls, page);
-      const cached = append ? null : getCache(cacheKey);
+      const cached = append || force ? null : getCache(cacheKey);
       if (cached) {
         const movies = cached?.data?.movies;
         if (Array.isArray(movies)) {
+          if (requestId !== pageState.requestId || requestedType !== currentRankType) return;
           renderMovies(movies);
           setupLoadMore();
           setStatus("已从缓存加载", "is-success");
@@ -579,6 +592,8 @@ ${renderRankTabs(type)}
 
       const res = await apiRequest(config);
       const data = JSON.parse(res.responseText || "{}");
+
+      if (requestId !== pageState.requestId || requestedType !== currentRankType) return;
 
       if (data?.action) {
         if (/JWTVerification/i.test(data.action)) { GM_setValue(TOKEN_KEY, ""); return setStatus("Token 已失效，请重新登录", "is-danger"); }
@@ -602,8 +617,10 @@ ${renderRankTabs(type)}
       if (!append) listEl.innerHTML = "";
       setStatus(String(err?.message || err).slice(0, 200), "is-danger");
     } finally {
-      pageState.loading = false;
-      setLoadMoreState(pageState.exhausted ? "暂无更多" : "滚动加载", false);
+      if (requestId === pageState.requestId) {
+        pageState.loading = false;
+        setLoadMoreState(pageState.exhausted ? "暂无更多" : "滚动加载", false);
+      }
     }
   };
 
@@ -626,16 +643,19 @@ ${renderRankTabs(type)}
       }
       controlsEl.innerHTML = `<label class="x-rank-control"><span>\u7c7b\u578b</span><span class="select is-small"><select id="x-rank-top-type"><option value="">\u9ed8\u8ba4</option><option value="0">\u6709\u7801</option><option value="1">\u65e0\u7801</option><option value="all">\u5168\u90e8</option></select></span></label>
 <button class="button is-small is-link" id="x-rank-load-btn">\u52a0\u8f7d</button>`;
-      controlsEl.querySelector("#x-rank-load-btn").addEventListener("click", () => doLoad());
+      controlsEl.querySelector("#x-rank-load-btn").addEventListener("click", () => doLoad({ force: true }));
+      controlsEl.querySelector("#x-rank-top-type").addEventListener("change", () => doLoad({ force: true }));
     } else if (info.kind === "playback") {
       controlsEl.innerHTML = `<label class="x-rank-control"><span>\u5468\u671f</span><span class="select is-small"><select id="x-rank-play-period"><option value="daily">\u6bcf\u65e5</option><option value="weekly">\u6bcf\u5468</option><option value="monthly">\u6bcf\u6708</option></select></span></label>
 <label class="x-rank-control"><span>\u7b5b\u9009</span><span class="select is-small"><select id="x-rank-play-filter"><option value="all">\u5168\u90e8</option><option value="high_score">\u9ad8\u5206</option></select></span></label>
 <button class="button is-small is-link" id="x-rank-load-btn">\u52a0\u8f7d</button>`;
-      controlsEl.querySelector("#x-rank-load-btn").addEventListener("click", () => doLoad());
+      controlsEl.querySelector("#x-rank-load-btn").addEventListener("click", () => doLoad({ force: true }));
+      controlsEl.querySelectorAll("#x-rank-play-period, #x-rank-play-filter").forEach((control) => control.addEventListener("change", () => doLoad({ force: true })));
     } else {
       controlsEl.innerHTML = `<label class="x-rank-control"><span>${html(info.label)}\u5468\u671f</span><span class="select is-small"><select id="x-rank-period"><option value="daily">\u6bcf\u65e5</option><option value="weekly">\u6bcf\u5468</option><option value="monthly" selected>\u6bcf\u6708</option></select></span></label>
 <button class="button is-small is-link" id="x-rank-load-btn">\u52a0\u8f7d</button>`;
-      controlsEl.querySelector("#x-rank-load-btn").addEventListener("click", () => doLoad());
+      controlsEl.querySelector("#x-rank-load-btn").addEventListener("click", () => doLoad({ force: true }));
+      controlsEl.querySelector("#x-rank-period").addEventListener("change", () => doLoad({ force: true }));
     }
     doLoad();
   };
@@ -664,7 +684,7 @@ ${renderRankTabs(type)}
         <div class="cover">
           <a class="x-rank-card-link" href="${html(link)}" title="${html(`${number} ${title}`.trim())}">
             <img src="${html(cover)}" data-covers="${html(JSON.stringify(covers))}" data-cover-index="0" loading="lazy" referrerpolicy="no-referrer" style="width:100%;height:auto" onerror="try{const a=JSON.parse(this.dataset.covers||'[]');const i=(Number(this.dataset.coverIndex)||0)+1;if(i<a.length){this.dataset.coverIndex=i;this.src=a[i];}else{this.style.display='none';}}catch(e){this.style.display='none';}">
-            <span class="tag is-danger x-rank-badge" style="position:absolute;top:2.35rem;left:0.35rem;z-index:2">#${html(rank)}</span>
+            <span class="tag is-danger x-rank-badge">#${html(rank)}</span>
           </a>
         </div>
         <a class="x-rank-title-link" href="${html(link)}" title="${html(`${number} ${title}`.trim())}">
