@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.layout
 // @namespace       JavDB.layout@blc
-// @version         0.0.3
+// @version         0.0.4
 // @author          blc
 // @description     JavDB 样式
 // @match           https://javdb.com/*
@@ -118,6 +118,8 @@
     root.style.setProperty("--x-layout-columns", String(config.waterfallColumns));
     root.style.setProperty("--x-gap", `${config.cardGap}px`);
     root.style.setProperty("--x-layout-card-radius", `${config.cardRadius}px`);
+    // A colored match frame is 0.375rem thick, so its outer radius must include that thickness.
+    root.style.setProperty("--x-layout-match-radius", `${config.cardRadius ? config.cardRadius + 6 : 0}px`);
     root.style.setProperty("--x-layout-background-base", colors[0]);
     root.style.setProperty("--x-layout-background-image", toBackgroundUrl(config));
   };
