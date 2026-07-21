@@ -299,7 +299,8 @@ html.x-score-filter-active .movie-list .item.x-score-filtered {
   display: inline-block;
   margin-right: 0;
   margin-bottom: 0.5rem;
-  vertical-align: middle;
+  vertical-align: bottom;
+  transform: translateY(1px);
 }
 
 .toolbar .x-score-filter-toggle {
