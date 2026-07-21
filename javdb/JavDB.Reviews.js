@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.Reviews
 // @namespace       JavDB.Reviews.local
-// @version         0.0.1
+// @version         0.0.4
 // @author          ziyuxingyuan
 // @description     JavDB短评完整显示，集成增强样式，客户端分页显示评论，点击翻页自动回顶部，自动重试+高性能签名缓存
 // @match           https://javdb.com/v/*
@@ -10,6 +10,7 @@
 // @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.ReqDB.lib.js
 // @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Util.lib.js
 // @connect         jdforrepam.com // <--- 如果API域名变动，这里也需要手动修改!
+// @connect         jdforrepam.com
 // @connect         javdb.com
 // @run-at          document-end
 // @grant           GM_xmlhttpRequest
@@ -49,15 +50,15 @@ Util.upStore(); // 确保 JavPack 库的存储机制正常工作
 
   // 高性能签名获取
   const getOptimizedSignature = () => {
-    const cachedSign = SIGN_CACHE.get();
-    if (cachedSign) return cachedSign;
+    // The API validates a timestamp-bearing signature; generate it per request.
     const sign = ReqDB.signature();
     SIGN_CACHE.set(sign);
     return sign;
   };
 
   // 获取影片ID
-  const mid = unsafeWindow.appData?.split("/").at(-1);
+  const mid = location.pathname.match(/\/v\/([^/?#]+)/)?.[1]
+    || (typeof unsafeWindow.appData === 'string' ? unsafeWindow.appData.split('/').at(-1) : '');
   if (!mid) return;
 
   // 获取页面上的关键DOM节点
@@ -339,14 +340,17 @@ Util.upStore(); // 确保 JavPack 库的存储机制正常工作
     GM_xmlhttpRequest({
       url: `${apiUrl}?${new URLSearchParams(params).toString()}`,
       method: "GET",
-      headers: { "jdSignature": signature },
+      headers: {
+        jdsignature: signature,
+        accept: 'application/json',
+      },
       timeout: 8000,
       onload: function(response) {
         if (response.status === 200) {
           try {
             const data = JSON.parse(response.responseText);
             // 处理当前页API数据，并决定是否加载下一页API数据
-            processApiPage(data?.data?.reviews ?? [], pageToFetch);
+            processApiPage(data?.data?.reviews ?? data?.reviews ?? [], pageToFetch);
           } catch (e) {
             handleError("数据解析失败", e, pageToFetch);
           }
@@ -405,7 +409,7 @@ Util.upStore(); // 确保 JavPack 库的存储机制正常工作
     if (!target) return;
 
     const { dataset, classList } = target;
-    if (dataset.movieTabTarget !== "reviewTab") return;
+    if (dataset.movieTabTarget !== "review" && dataset.movieTabTarget !== "reviewTab") return;
 
     e.preventDefault();
     e.stopPropagation();
