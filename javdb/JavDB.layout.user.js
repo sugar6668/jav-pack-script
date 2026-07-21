@@ -45,7 +45,7 @@
       cardGap: clamp(saved.cardGap ?? DEFAULT_CONFIG.cardGap, 4, 40),
       cardRadius: clamp(saved.cardRadius ?? DEFAULT_CONFIG.cardRadius, 0, 32),
       backgroundPreset: BACKGROUND_PRESETS[saved.backgroundPreset] ? saved.backgroundPreset : DEFAULT_CONFIG.backgroundPreset,
-      backgroundSpeed: clamp(saved.backgroundSpeed ?? DEFAULT_CONFIG.backgroundSpeed, 0.35, 2),
+      backgroundSpeed: clamp(saved.backgroundSpeed ?? DEFAULT_CONFIG.backgroundSpeed, 0, 1),
     };
   };
 
@@ -156,7 +156,7 @@
           <div class="x-layout-section">
             <p class="x-layout-section-title">\u52a8\u6001\u6e10\u53d8\u80cc\u666f</p>
             <label class="x-layout-background-row" for="x-layout-background-preset"><span>\u6e10\u53d8\u914d\u8272</span><select id="x-layout-background-preset" class="x-layout-preset">${Object.entries(BACKGROUND_PRESETS).map(([id, preset]) => `<option value="${id}" ${id === config.backgroundPreset ? "selected" : ""}>${preset.name}</option>`).join("")}</select></label>
-            ${field({ id: "x-layout-background-speed", label: "\u52a8\u6001\u901f\u7387", min: 0.35, max: 2, step: 0.05, suffix: "\u00d7", value: config.backgroundSpeed })}
+            ${field({ id: "x-layout-background-speed", label: "\u52a8\u6001\u901f\u7387", min: 0, max: 1, step: 0.05, suffix: "\u00d7", value: config.backgroundSpeed })}
             <div class="x-layout-preview" aria-label="\u5f53\u524d\u6e10\u53d8\u914d\u8272\u9884\u89c8"></div>
           </div>
         </section>
@@ -209,7 +209,7 @@
       cardGap: clamp(inputs.cardGap.value, 4, 40),
       cardRadius: clamp(inputs.cardRadius.value, 0, 32),
       backgroundPreset: BACKGROUND_PRESETS[inputs.backgroundPreset.value] ? inputs.backgroundPreset.value : DEFAULT_CONFIG.backgroundPreset,
-      backgroundSpeed: clamp(inputs.backgroundSpeed.value, 0.35, 2),
+      backgroundSpeed: clamp(inputs.backgroundSpeed.value, 0, 1),
     });
 
     const setInputs = (next) => {
