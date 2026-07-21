@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.Reviews
 // @namespace       JavDB.Reviews.local
-// @version         0.0.3
+// @version         0.0.4
 // @author          ziyuxingyuan
 // @description     JavDB短评完整显示，集成增强样式，客户端分页显示评论，点击翻页自动回顶部，自动重试+高性能签名缓存
 // @match           https://javdb.com/v/*
@@ -135,13 +135,18 @@
 
   const publishReviewEd2k = () => {
     const code = document.querySelector('.first-block .value')?.textContent.trim() || '番号';
-    const links = [...new Set(allReviews.flatMap(({ content = '' }) => String(content).match(ED2K_REG) || []))];
-    const sources = links.map((url) => ({
+    const links = new Set();
+    allReviews.forEach(({ content = '' }) => {
+      (String(content).match(ED2K_REG) || []).forEach((url) => links.add(url));
+    });
+
+    const sources = [...links].map((url) => ({
       url,
       // 文件名里的 www.98T.la@ 前缀和 _restored 后缀会在既有的 115
       // 离线重命名流程中，按番号和破解标记统一清理。
       name: `${code} 破解 ed2k`,
       type: 'ed2k',
+      size: '',
     }));
 
     if (magnetsNode) magnetsNode.dataset.reviewEd2k = JSON.stringify(sources);
@@ -316,12 +321,12 @@
       return;
     }
 
-    publishReviewEd2k();
-
     console.log(`${SCRIPT_NAME}: API加载完成，共获取 ${allReviews.length} 条评论。`);
 
     currentDisplayPage = 1;
     displayCurrentPageReviews();
+    // 磁力面板的同步不应阻断短评本身的渲染。
+    setTimeout(publishReviewEd2k, 0);
   };
 
   const processApiPage = (reviews, pageFetched) => {
@@ -543,5 +548,12 @@
   if (!activeReviewTab && getComputedStyle(reviewsNode).display !== 'none') {
     console.log(`${SCRIPT_NAME}: 检测到 #reviews 已显示，自动执行增强渲染。`);
     showReviews();
+  }
+
+  // 页面打开即静默拉取全部短评；仅更新隐藏的短评容器和磁力面板，
+  // 不切换当前 Tab。之后点击“短评”仍沿用同一份已加载的数据。
+  if (!activeReviewTab && getComputedStyle(reviewsNode).display === 'none') {
+    isFetchingApi = true;
+    fetchReviews(currentApiPage);
   }
 })();
