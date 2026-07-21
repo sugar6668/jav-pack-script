@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.Reviews
 // @namespace       JavDB.Reviews.local
-// @version         0.0.2
+// @version         0.0.3
 // @author          ziyuxingyuan
 // @description     JavDB短评完整显示，集成增强样式，客户端分页显示评论，点击翻页自动回顶部，自动重试+高性能签名缓存
 // @match           https://javdb.com/v/*
@@ -130,6 +130,23 @@
   let lastRequestTime = 0;
   let isFetchingApi = false;
   let hasFetchedOnce = false;
+
+  const ED2K_REG = /ed2k:\/\/\|file\|[^|\r\n]+\|\d+\|[a-f\d]{32}\|\/?/gi;
+
+  const publishReviewEd2k = () => {
+    const code = document.querySelector('.first-block .value')?.textContent.trim() || '番号';
+    const links = [...new Set(allReviews.flatMap(({ content = '' }) => String(content).match(ED2K_REG) || []))];
+    const sources = links.map((url) => ({
+      url,
+      // 文件名里的 www.98T.la@ 前缀和 _restored 后缀会在既有的 115
+      // 离线重命名流程中，按番号和破解标记统一清理。
+      name: `${code} 破解 ed2k`,
+      type: 'ed2k',
+    }));
+
+    if (magnetsNode) magnetsNode.dataset.reviewEd2k = JSON.stringify(sources);
+    window.dispatchEvent(new CustomEvent('JavDB.reviewEd2k', { detail: sources }));
+  };
 
   const renderCont = (insert) => {
     return `<article class="message video-panel"><div class="message-body">${insert}</div></article>`;
@@ -298,6 +315,8 @@
       console.log(`${SCRIPT_NAME}: API加载完成，无评论数据。`);
       return;
     }
+
+    publishReviewEd2k();
 
     console.log(`${SCRIPT_NAME}: API加载完成，共获取 ${allReviews.length} 条评论。`);
 

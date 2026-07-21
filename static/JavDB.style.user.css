@@ -1816,3 +1816,7 @@ br + .title {
     display: none;
   }
 }
+
+#magnets-content .x-magnet-type {
+  text-transform: lowercase;
+}

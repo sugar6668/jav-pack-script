@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.magnet
 // @namespace       JavDB.magnet@blc
-// @version         0.0.2
+// @version         0.0.3
 // @author          blc
 // @description     磁链扩展
 // @match           https://javdb.com/v/*
@@ -53,7 +53,7 @@ Util.upStore();
       .filter(({ url }) => url);
   };
 
-  const renderMagnet = ({ url, name, meta, zh, crack, hd, date }, idx) => {
+  const renderMagnet = ({ url, name, meta, zh, crack, hd, date, type }, idx) => {
     return `
     <div class="item columns is-desktop${(idx + 1) % 2 !== 0 ? " odd" : ""}">
       <div class="magnet-name column is-four-fifths">
@@ -64,6 +64,7 @@ Util.upStore();
             ${zh ? "<span class='tag is-warning is-small is-light'>字幕</span>" : ""}
             ${crack ? "<span class='tag is-info is-small is-light'>破解</span>" : ""}
             ${hd ? "<span class='tag is-primary is-small is-light'>高清</span>" : ""}
+            ${type === "ed2k" ? "<span class='tag is-small is-light x-magnet-type'>ed2k</span>" : ""}
           </div>
         </a>
       </div>
@@ -178,6 +179,8 @@ Util.upStore();
   setHeader(code);
 
   const details = GM_getValue(mid, {});
+  const reviewEd2k = JSON.parse(CONT.dataset.reviewEd2k || "[]");
+  if (reviewEd2k.length) details.reviewEd2k = reviewEd2k;
   if (Object.keys(details).length) setMagnets(details);
 
   const setDetails = (sources, key) => {
@@ -185,6 +188,12 @@ Util.upStore();
     GM_setValue(mid, details);
     setMagnets(details);
   };
+
+  window.addEventListener("JavDB.reviewEd2k", ({ detail: sources }) => {
+    details.reviewEd2k = Array.isArray(sources) ? sources : [];
+    GM_setValue(mid, details);
+    setMagnets(details);
+  });
 
   const refreshMagnets = async (trigger) => {
     trigger?.classList.add("is-loading");
