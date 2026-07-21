@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.filter
 // @namespace       JavDB.filter@blc
-// @version         0.0.8
+// @version         0.0.9
 // @author          blc
 // @description     评分筛选与性癖净化
 // @match           https://javdb.com/*
@@ -189,16 +189,14 @@
     const toolbar = document.querySelector(".toolbar");
     if (!toolbar || document.getElementById(FILTER_TOGGLE_ID)) return Boolean(toolbar);
 
-    const toggleGroup = document.createElement("span");
-    toggleGroup.className = "button-group x-score-filter-toggle-group";
     const toggle = document.createElement("button");
     toggle.id = FILTER_TOGGLE_ID;
     toggle.type = "button";
+    // Match JavDB's native toolbar button shape exactly; the extra class is styling only.
     toggle.className = "button is-small x-score-filter-toggle";
     toggle.addEventListener("click", () => setScoreFilterEnabled(!scoreFilterEnabled));
-    toggleGroup.append(toggle);
     // Keep the filter control after every native toolbar control.
-    toolbar.append(toggleGroup);
+    toolbar.append(toggle);
     updateScoreFilterToggle();
     return true;
   };
