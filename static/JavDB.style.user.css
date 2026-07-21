@@ -295,6 +295,13 @@ html.x-score-filter-active .movie-list .item.x-score-filtered {
   opacity: 0.7;
 }
 
+.toolbar .x-score-filter-toggle-group {
+  display: inline-block;
+  margin-right: 0;
+  margin-bottom: 0.5rem;
+  vertical-align: middle;
+}
+
 .toolbar .x-score-filter-toggle {
   min-width: 5.5em;
   margin-left: 0.25rem;

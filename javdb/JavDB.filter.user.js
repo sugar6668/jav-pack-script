@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.filter
 // @namespace       JavDB.filter@blc
-// @version         0.0.6
+// @version         0.0.8
 // @author          blc
 // @description     评分筛选与性癖净化
 // @match           https://javdb.com/*
@@ -189,16 +189,16 @@
     const toolbar = document.querySelector(".toolbar");
     if (!toolbar || document.getElementById(FILTER_TOGGLE_ID)) return Boolean(toolbar);
 
-    const displayButton = [...toolbar.querySelectorAll("button, a")]
-      .find((node) => node.textContent.trim() === "\u5c55\u793a");
-    if (!displayButton) return false;
-
+    const toggleGroup = document.createElement("span");
+    toggleGroup.className = "button-group x-score-filter-toggle-group";
     const toggle = document.createElement("button");
     toggle.id = FILTER_TOGGLE_ID;
     toggle.type = "button";
     toggle.className = "button is-small x-score-filter-toggle";
     toggle.addEventListener("click", () => setScoreFilterEnabled(!scoreFilterEnabled));
-    displayButton.insertAdjacentElement("afterend", toggle);
+    toggleGroup.append(toggle);
+    // Keep the filter control after every native toolbar control.
+    toolbar.append(toggleGroup);
     updateScoreFilterToggle();
     return true;
   };
