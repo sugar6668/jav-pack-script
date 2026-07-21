@@ -276,6 +276,7 @@ html.x-score-filter-active .movie-list .item.x-score-filtered {
 .x-score-mask-weak {
   position: relative !important;
   isolation: isolate;
+  border-radius: var(--x-layout-card-radius);
 }
 
 .x-score-mask-low::after,
@@ -286,7 +287,7 @@ html.x-score-filter-active .movie-list .item.x-score-filtered {
   pointer-events: none;
   content: "";
   background: #fff;
-  border-radius: inherit;
+  border-radius: var(--x-layout-card-radius);
 }
 
 .x-score-mask-low::after {
