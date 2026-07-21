@@ -192,6 +192,17 @@ function getCache(key) {
   const ttl = key.startsWith(`${CACHE_PREFIX}playback_`) ? PLAYBACK_CACHE_TTL : CACHE_TTL;
   return cache?.ts && cache?.data && Date.now() - cache.ts <= ttl ? cache.data : null;
 }
+
+function topTypeMatches(movieEntry, selectedType) {
+  if (!/^[01]$/.test(String(selectedType))) return true;
+  const movie = movieEntry?.movie || movieEntry || {};
+  const rawType = movie.type ?? movie.movie_type ?? movie.video_type ?? movie.category_type ?? movie.is_uncensored ?? movie.uncensored ?? "";
+  const normalized = String(rawType).trim().toLowerCase();
+  if (!normalized) return true; // Old API responses do not expose a type field.
+  if (["0", "false", "censored", "有码", "有碼"].includes(normalized)) return selectedType === "0";
+  if (["1", "true", "uncensored", "无码", "無碼"].includes(normalized)) return selectedType === "1";
+  return true;
+}
 function setCache(key, data) {
   GM_setValue(key, { ts: Date.now(), data });
 }
@@ -574,7 +585,7 @@ ${renderRankTabs(type)}
         const movies = cached?.data?.movies;
         if (Array.isArray(movies)) {
           if (requestId !== pageState.requestId || requestedType !== currentRankType) return;
-          renderMovies(movies);
+          renderMovies(movies, { topType: controls.topType });
           setupLoadMore();
           setStatus("已从缓存加载", "is-success");
           return;
@@ -602,7 +613,7 @@ ${renderRankTabs(type)}
       if (data?.error) return setStatus(data.error.slice(0, 200), "is-danger");
       if (!data?.data?.movies || !Array.isArray(data.data.movies)) return setStatus("接口数据异常", "is-danger");
 
-      const added = renderMovies(data.data.movies, { append });
+      const added = renderMovies(data.data.movies, { append, topType: controls.topType });
       if (!append) setCache(cacheKey, data);
       if (append) {
         if (added > 0) { pageState.page = page; setStatus(`已加载第 ${page} 页`, "is-success"); }
@@ -660,10 +671,11 @@ ${renderRankTabs(type)}
     doLoad();
   };
 
-  const renderMovies = (movies, { append = false } = {}) => {
+  const renderMovies = (movies, { append = false, topType = "" } = {}) => {
     if (!movies.length) { if (!append) listEl.innerHTML = '<div class="notification">暂无数据</div>'; return 0; }
     const existingLinks = append ? new Set(Array.from(listEl.querySelectorAll('.x-rank-card a[href]')).map((a) => a.getAttribute("href"))) : new Set();
     const filtered = movies.filter((m) => {
+      if (currentRankType === "top" && !topTypeMatches(m, topType)) return false;
       const number = m.number || "";
       const link = m.id ? `/v/${m.id}` : `/search?q=${encodeURIComponent(number)}`;
       if (!append || !existingLinks.has(link)) return true;
@@ -672,7 +684,10 @@ ${renderRankTabs(type)}
     const offset = append ? listEl.querySelectorAll(".x-rank-card").length : 0;
     const markup = filtered.map((m, i) => {
       const number = m.number || "";
-      const title = m.title || m.origin_title || m.current_title || "";
+      // Rankings API supplies localized `title` and the original title separately.
+      // Cards deliberately show the original title; detail pages keep their native
+      // original/translation toggle untouched.
+      const title = m.origin_title || m.current_title || m.title || "";
       const covers = coverCandidates(m);
       const cover = covers[0] || "";
       const rank = m.ranking || offset + i + 1;

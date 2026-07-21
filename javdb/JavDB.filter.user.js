@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.filter
 // @namespace       JavDB.filter@blc
-// @version         0.0.4
+// @version         0.0.6
 // @author          blc
 // @description     评分筛选与性癖净化
 // @match           https://javdb.com/*
@@ -15,6 +15,9 @@
 (function () {
   const MANUAL_BLOCK_STORAGE_KEY = "manualBlockedMovies";
   const MENU_ID = "javdb-filter-menu";
+  const FILTER_TOGGLE_ID = "x-score-filter-toggle";
+
+  let scoreFilterEnabled = true;
 
   const SCORE_CONFIG = {
     lowOpacity: "10%",
@@ -129,9 +132,9 @@
     const isWestern = SCORE_CONFIG.westernCodePattern.test(details.fullText);
     if (!isWestern) {
       if (rating < SCORE_CONFIG.lowRating || (rating <= SCORE_CONFIG.weakRating && votes < SCORE_CONFIG.lowVotes)) {
-        item.style.opacity = SCORE_CONFIG.lowOpacity;
+        item.classList.add("x-score-mask-low", "x-score-filtered");
       } else if (rating >= SCORE_CONFIG.weakRating && votes < SCORE_CONFIG.weakVotes) {
-        item.style.opacity = SCORE_CONFIG.weakOpacity;
+        item.classList.add("x-score-mask-weak", "x-score-filtered");
       }
     }
 
@@ -165,6 +168,39 @@
       if (applyPurify(item, details)) return;
       applyScoreFilter(item, details);
     });
+  };
+
+  const updateScoreFilterToggle = () => {
+    const button = document.getElementById(FILTER_TOGGLE_ID);
+    if (!button) return;
+    button.textContent = scoreFilterEnabled ? "\u5df2\u8fc7\u6ee4" : "\u672a\u8fc7\u6ee4";
+    button.classList.toggle("is-filter-active", scoreFilterEnabled);
+    button.classList.toggle("is-filter-inactive", !scoreFilterEnabled);
+    button.setAttribute("aria-pressed", String(scoreFilterEnabled));
+  };
+
+  const setScoreFilterEnabled = (enabled) => {
+    scoreFilterEnabled = enabled;
+    document.documentElement.classList.toggle("x-score-filter-active", enabled);
+    updateScoreFilterToggle();
+  };
+
+  const initScoreFilterToggle = () => {
+    const toolbar = document.querySelector(".toolbar");
+    if (!toolbar || document.getElementById(FILTER_TOGGLE_ID)) return Boolean(toolbar);
+
+    const displayButton = [...toolbar.querySelectorAll("button, a")]
+      .find((node) => node.textContent.trim() === "\u5c55\u793a");
+    if (!displayButton) return false;
+
+    const toggle = document.createElement("button");
+    toggle.id = FILTER_TOGGLE_ID;
+    toggle.type = "button";
+    toggle.className = "button is-small x-score-filter-toggle";
+    toggle.addEventListener("click", () => setScoreFilterEnabled(!scoreFilterEnabled));
+    displayButton.insertAdjacentElement("afterend", toggle);
+    updateScoreFilterToggle();
+    return true;
   };
 
   const closeBlockMenu = () => document.getElementById(MENU_ID)?.remove();
@@ -204,6 +240,15 @@
     cancelButton.addEventListener("click", closeBlockMenu);
     document.body.append(menu);
   };
+
+  setScoreFilterEnabled(true);
+  if (!initScoreFilterToggle()) {
+    const toolbarObserver = new MutationObserver(() => {
+      if (!initScoreFilterToggle()) return;
+      toolbarObserver.disconnect();
+    });
+    toolbarObserver.observe(document.body, { childList: true, subtree: true });
+  }
 
   processCards(document.querySelectorAll(".movie-list .item"));
   window.addEventListener("JavDB.scroll", ({ detail }) => processCards(detail || []));

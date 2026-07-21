@@ -264,6 +264,57 @@ body:has(.x-load) #footer,
   }
 }
 
+
+/* JavDB.filter: score masks and the toolbar filter toggle. */
+html.x-score-filter-active .movie-list .item.x-score-filtered {
+  display: none !important;
+}
+
+.x-score-mask-low,
+.x-score-mask-weak {
+  position: relative !important;
+  isolation: isolate;
+}
+
+.x-score-mask-low::after,
+.x-score-mask-weak::after {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  content: "";
+  background: #fff;
+  border-radius: inherit;
+}
+
+.x-score-mask-low::after {
+  opacity: 0.9;
+}
+
+.x-score-mask-weak::after {
+  opacity: 0.7;
+}
+
+.toolbar .x-score-filter-toggle {
+  min-width: 5.5em;
+  margin-left: 0.25rem;
+  font-size: var(--x-size-sm);
+  font-weight: 600;
+  transition: var(--x-trans);
+}
+
+.toolbar .x-score-filter-toggle.is-filter-active {
+  color: #fff;
+  background-color: var(--x-info);
+  border-color: var(--x-info);
+}
+
+.toolbar .x-score-filter-toggle.is-filter-inactive {
+  color: #596579;
+  background-color: #fff;
+  border-color: #cfd8e6;
+}
+
 .toolbar {
   padding: 0 0 0.5rem;
   font-size: 0;
