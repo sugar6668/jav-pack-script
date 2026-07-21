@@ -1779,3 +1779,40 @@ br + .title {
     margin: 0.75rem 0;
   }
 }
+
+.navbar .x-searchbar-wrapper {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+
+  .search-bar-wrap {
+    width: 600px;
+    max-width: 100%;
+    background: transparent;
+
+    input,
+    select,
+    button,
+    #button-advanced-search,
+    #search-submit,
+    .search-image,
+    .search-submit {
+      background-color: var(--x-bg);
+      backdrop-filter: saturate(1.8) blur(20px);
+      border-color: var(--x-bd);
+    }
+
+    .search-panel {
+      display: flex;
+      margin-bottom: 0 !important;
+    }
+
+    #search-submit {
+      color: var(--x-cl);
+    }
+  }
+
+  .search-recent-keywords {
+    display: none;
+  }
+}
