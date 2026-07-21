@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.layout
 // @namespace       JavDB.layout@blc
-// @version         0.0.2
+// @version         0.0.3
 // @author          blc
 // @description     JavDB 样式
 // @match           https://javdb.com/*
@@ -21,6 +21,7 @@
     detailWidth: 96,
     waterfallColumns: 4,
     cardGap: 16,
+    cardRadius: 0,
     backgroundPreset: "telegram",
     backgroundSpeed: 1,
   };
@@ -42,6 +43,7 @@
       detailWidth: clamp(saved.detailWidth ?? DEFAULT_CONFIG.detailWidth, 70, 100),
       waterfallColumns: clamp(saved.waterfallColumns ?? DEFAULT_CONFIG.waterfallColumns, 2, 8),
       cardGap: clamp(saved.cardGap ?? DEFAULT_CONFIG.cardGap, 4, 40),
+      cardRadius: clamp(saved.cardRadius ?? DEFAULT_CONFIG.cardRadius, 0, 32),
       backgroundPreset: BACKGROUND_PRESETS[saved.backgroundPreset] ? saved.backgroundPreset : DEFAULT_CONFIG.backgroundPreset,
       backgroundSpeed: clamp(saved.backgroundSpeed ?? DEFAULT_CONFIG.backgroundSpeed, 0.35, 2),
     };
@@ -115,6 +117,7 @@
     root.style.setProperty("--x-layout-detail-width", `${config.detailWidth}%`);
     root.style.setProperty("--x-layout-columns", String(config.waterfallColumns));
     root.style.setProperty("--x-gap", `${config.cardGap}px`);
+    root.style.setProperty("--x-layout-card-radius", `${config.cardRadius}px`);
     root.style.setProperty("--x-layout-background-base", colors[0]);
     root.style.setProperty("--x-layout-background-image", toBackgroundUrl(config));
   };
@@ -146,6 +149,7 @@
             ${field({ id: "x-layout-detail-width", label: "\u8be6\u60c5\u9875\u5bbd\u5ea6", min: 70, max: 100, step: 1, suffix: "%", value: config.detailWidth })}
             ${field({ id: "x-layout-columns", label: "\u7011\u5e03\u6d41\u5217\u6570", min: 2, max: 8, step: 1, suffix: " \u5217", value: config.waterfallColumns })}
             ${field({ id: "x-layout-card-gap", label: "\u5361\u7247\u95f4\u8ddd", min: 4, max: 40, step: 1, suffix: "px", value: config.cardGap })}
+            ${field({ id: "x-layout-card-radius", label: "\u5361\u7247\u5706\u89d2", min: 0, max: 32, step: 1, suffix: "px", value: config.cardRadius })}
           </div>
           <div class="x-layout-section">
             <p class="x-layout-section-title">\u52a8\u6001\u6e10\u53d8\u80cc\u666f</p>
@@ -181,6 +185,7 @@
       detailWidth: modal.querySelector("#x-layout-detail-width"),
       waterfallColumns: modal.querySelector("#x-layout-columns"),
       cardGap: modal.querySelector("#x-layout-card-gap"),
+      cardRadius: modal.querySelector("#x-layout-card-radius"),
       backgroundPreset: modal.querySelector("#x-layout-background-preset"),
       backgroundSpeed: modal.querySelector("#x-layout-background-speed"),
     };
@@ -188,7 +193,7 @@
 
     const syncOutputs = () => {
       Object.values(inputs).filter((input) => input.type === "range").forEach((input) => {
-        const suffix = input.id === "x-layout-columns" ? " \u5217" : input.id === "x-layout-card-gap" ? "px" : input.id === "x-layout-background-speed" ? "\u00d7" : "%";
+        const suffix = input.id === "x-layout-columns" ? " \u5217" : input.id === "x-layout-card-gap" || input.id === "x-layout-card-radius" ? "px" : input.id === "x-layout-background-speed" ? "\u00d7" : "%";
         input.nextElementSibling.textContent = `${input.value}${suffix}`;
       });
       const colors = getPreset(inputs.backgroundPreset.value).colors;
@@ -200,6 +205,7 @@
       detailWidth: clamp(inputs.detailWidth.value, 70, 100),
       waterfallColumns: clamp(inputs.waterfallColumns.value, 2, 8),
       cardGap: clamp(inputs.cardGap.value, 4, 40),
+      cardRadius: clamp(inputs.cardRadius.value, 0, 32),
       backgroundPreset: BACKGROUND_PRESETS[inputs.backgroundPreset.value] ? inputs.backgroundPreset.value : DEFAULT_CONFIG.backgroundPreset,
       backgroundSpeed: clamp(inputs.backgroundSpeed.value, 0.35, 2),
     });
@@ -209,6 +215,7 @@
       inputs.detailWidth.value = next.detailWidth;
       inputs.waterfallColumns.value = next.waterfallColumns;
       inputs.cardGap.value = next.cardGap;
+      inputs.cardRadius.value = next.cardRadius;
       inputs.backgroundPreset.value = next.backgroundPreset;
       inputs.backgroundSpeed.value = next.backgroundSpeed;
       syncOutputs();
