@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.search
 // @namespace       JavDB.search@blc
-// @version         0.0.3
+// @version         0.0.5
 // @author          blc
 // @description     快捷搜索
 // @match           https://javdb.com/*
@@ -12,8 +12,14 @@
 // ==/UserScript==
 
 (function () {
-  const openSearchInTab = (form) => {
-    const input = form.querySelector("#video-search");
+  const SEARCH_INPUT = "#video-search, input[name='q']";
+
+  const getSearchInput = (target) => {
+    if (!(target instanceof Element)) return null;
+    return target.closest(SEARCH_INPUT) ?? target.closest(".search-bar-wrap")?.querySelector(SEARCH_INPUT) ?? null;
+  };
+
+  const openSearchInTab = (input) => {
     const keyword = input?.value.trim();
     if (!keyword) return false;
 
@@ -29,8 +35,38 @@
     "submit",
     (e) => {
       const form = e.target;
-      if (!(form instanceof HTMLFormElement) || !form.querySelector("#video-search")) return;
-      if (!openSearchInTab(form)) return;
+      if (!(form instanceof HTMLFormElement) || !form.querySelector(SEARCH_INPUT)) return;
+      if (!openSearchInTab(form.querySelector(SEARCH_INPUT))) return;
+
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    },
+    true,
+  );
+
+  // JavDB/Turbo may handle the submit button before a form submit event is
+  // dispatched. Intercept the user gesture itself so both clicking and Enter
+  // consistently open the result in a new tab.
+  document.addEventListener(
+    "click",
+    (e) => {
+      const button = e.target instanceof Element ? e.target.closest("#search-submit, .search-submit") : null;
+      if (!button) return;
+
+      if (!openSearchInTab(getSearchInput(button))) return;
+
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key !== "Enter" || e.isComposing) return;
+
+      if (!openSearchInTab(getSearchInput(e.target))) return;
 
       e.preventDefault();
       e.stopImmediatePropagation();
