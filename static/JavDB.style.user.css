@@ -532,12 +532,12 @@ html.x-score-filter-active .movie-list .item.x-score-filtered {
         min-width: 2em;
         height: auto;
         padding: 0;
-        color: var(--x-warning);
+        color: #ffe08a;
         background-color: transparent;
 
         svg {
-          width: 2em;
-          height: 2em;
+          width: 2.5em;
+          height: 2.5em;
         }
       }
 
