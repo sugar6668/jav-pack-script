@@ -429,7 +429,7 @@ function ensureRankStyles() {
 #x-rankings-override-page .movie-list .item {
   overflow: hidden;
   border: 1px solid var(--border, rgba(127,127,127,.18));
-  border-radius: 10px;
+  border-radius: var(--x-layout-card-radius);
   background: var(--body-background-color, #fff);
   box-shadow: 0 6px 18px rgba(10,10,10,.09);
   transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
@@ -442,13 +442,17 @@ function ensureRankStyles() {
 #x-rankings-override-page .movie-list .item:has(.x-match:not(.is-normal)):not(.x-multi-matched) {
   border-style: solid;
   border-width: .375rem;
-  border-radius: 10px;
+  border-radius: var(--x-layout-match-radius);
 }
 #x-rankings-override-page .movie-list .item:has(.x-match.is-success):not(.x-multi-matched) { border-color: var(--x-success-bd); }
 #x-rankings-override-page .movie-list .item:has(.x-match.is-info):not(.x-multi-matched) { border-color: var(--x-info-bd); }
 #x-rankings-override-page .movie-list .item:has(.x-match.is-warning):not(.x-multi-matched) { border-color: var(--x-warning-bd); }
 #x-rankings-override-page .movie-list .item:has(.x-match.is-danger):not(.x-multi-matched) { border-color: var(--x-danger-bd); }
-#x-rankings-override-page .movie-list .item.x-multi-matched { border-color: transparent; }
+#x-rankings-override-page .movie-list .item.x-multi-matched {
+  /* The gradient frame has the same 0.375rem thickness as a single-color match. */
+  border-color: transparent;
+  border-radius: var(--x-layout-match-radius);
+}
 #x-rankings-override-page .x-rank-card-link,
 #x-rankings-override-page .x-rank-title-link {
   color: inherit;
@@ -458,7 +462,7 @@ function ensureRankStyles() {
 #x-rankings-override-page .movie-list .item .cover {
   position: relative;
   overflow: hidden;
-  border-radius: 10px 10px 0 0;
+  border-radius: var(--x-layout-card-radius) var(--x-layout-card-radius) 0 0;
   background: var(--bg, #222);
 }
 #x-rankings-override-page .movie-list .item .cover > a { display: block; color: inherit; text-decoration: none; border-bottom: 0; }
