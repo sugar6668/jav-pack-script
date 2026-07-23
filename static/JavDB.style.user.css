@@ -523,6 +523,23 @@ html.x-score-filter-active .movie-list .item.x-score-filtered {
     .tags.has-addons {
       min-height: 2em;
 
+      .x-match-subtitle {
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-self: stretch;
+        align-items: center;
+        justify-content: center;
+        min-width: 2em;
+        height: auto;
+        padding: 0 0.45em;
+        color: var(--x-warning);
+
+        svg {
+          width: 1em;
+          height: 1em;
+        }
+      }
+
       .tag:first-child {
         border-top-left-radius: 1px;
         border-bottom-left-radius: 1px;

@@ -3,6 +3,8 @@
  */
 window.JavPackMatch115Console = class JavPackMatch115Console {
   static zhReg = /中文|中字|字幕|\[[a-z]?hdc[a-z]?\]|[-_\s]+(uc|c|ch|cu|zh)(?![a-z])/i;
+
+  static subtitleFileReg = /\.(srt|ass|ssa|vtt|sub)$/i;
   static crackReg = /无码破解|無碼破解|流出|破解|解密版|uncensored|破[\u4E00-\u9FC6]版|[-_\s]+(cu|u|uc)(?![a-z])/i;
 
   static escapeHtml(value = "") {
@@ -56,15 +58,17 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
   static async resolveMetadata(req115, cid) {
     if (!req115 || !cid) return "";
     const res = await req115.files(cid, { limit: 1150 });
+    const files = res?.data || [];
     return {
       realPath: this.formatPathParts(res?.path || []),
-      hasCover: this.hasCoverFile(res?.data || []),
+      hasCover: this.hasCoverFile(files),
+      hasSubtitle: files.some((file) => this.subtitleFileReg.test(file.n || file.name || file.file_name || "")),
     };
   }
 
   static async enrichMetadata(items = [], req115) {
-    const cids = [...new Set(items.filter((item) => item?.cid && (!item.realPath || !item.paths?.length || item.hasCover === undefined)).map((item) => item.cid))];
-    const entries = await Promise.all(cids.map(async (cid) => [cid, await this.resolveMetadata(req115, cid).catch(() => ({ realPath: "", hasCover: false }))]));
+    const cids = [...new Set(items.filter((item) => item?.cid && (!item.realPath || !item.paths?.length || item.hasCover === undefined || item.hasSubtitle === undefined)).map((item) => item.cid))];
+    const entries = await Promise.all(cids.map(async (cid) => [cid, await this.resolveMetadata(req115, cid).catch(() => ({ realPath: "", hasCover: false, hasSubtitle: false }))]));
     const metadata = new Map(entries);
 
     for (const item of items) {
@@ -72,6 +76,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       if (!meta) continue;
       if (meta.realPath && !item.realPath) item.realPath = meta.realPath;
       if (item.hasCover === undefined) item.hasCover = meta.hasCover;
+      if (item.hasSubtitle === undefined) item.hasSubtitle = meta.hasSubtitle;
     }
 
     return items;
