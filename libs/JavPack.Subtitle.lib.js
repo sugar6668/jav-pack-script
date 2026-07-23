@@ -1,6 +1,6 @@
 /**
  * @name JavPack Subtitle Library
- * @description Xunlei subtitle search, preview, download, and 115 upload for JavDB.
+ * @description Xunlei and SubtitleCat subtitle search, preview, download, and 115 upload for JavDB.
  */
 window.JavPackSubtitle = class JavPackSubtitle {
   static BTN_ID = "x-subtitle-search-btn";
@@ -8,6 +8,13 @@ window.JavPackSubtitle = class JavPackSubtitle {
   static MODAL_ID = "x-subtitle-modal";
 
   static previewCache = new Map();
+
+  static SUBTITLECAT_ORIGIN = "https://www.subtitlecat.com";
+
+  static SUBTITLECAT_CHINESE_LANGUAGES = new Map([
+    ["zh-CN", "简中"],
+    ["zh-TW", "繁中"],
+  ]);
 
   static escapeHtml(value = "") {
     return String(value)
@@ -149,31 +156,23 @@ window.JavPackSubtitle = class JavPackSubtitle {
       if (e.target === overlay) closeModal();
     });
 
-    const performSearch = (kw) => {
+    const performSearch = async (kw) => {
       if (!kw) return;
-      contentWrap.innerHTML = '<div class="pdb-sub-msg">正在连接迅雷字幕接口，请稍候...</div>';
+      contentWrap.innerHTML = '<div class="pdb-sub-msg">正在搜索字幕来源，请稍候...</div>';
       previewBox.value = "";
       statusNode.textContent = "暂无预览";
 
-      GM_xmlhttpRequest({
-        method: "GET",
-        url: `https://api-shoulei-ssl.xunlei.com/oracle/subtitle?name=${encodeURIComponent(kw)}`,
-        onload: (res) => {
-          try {
-            const root = JSON.parse(res.responseText);
-            if (root.code !== 0 || !root.data?.length) {
-              contentWrap.innerHTML = '<div class="pdb-sub-msg">未找到相关字幕，请尝试删减搜索词</div>';
-              return;
-            }
-            this.renderTable({ container: contentWrap, dataList: this.sortResults(root.data, kw, details), previewBox, statusNode, overlay, details, getTargetCid, kw });
-          } catch (err) {
-            contentWrap.innerHTML = '<div class="pdb-sub-msg pdb-sub-error">API 数据解析失败</div>';
-          }
-        },
-        onerror: () => {
-          contentWrap.innerHTML = '<div class="pdb-sub-msg pdb-sub-error">请求失败，请检查网络设置</div>';
-        },
-      });
+      const results = await Promise.allSettled([
+        this.searchXunlei(kw),
+        this.searchSubtitleCat(kw),
+      ]);
+      const dataList = results.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+      const chineseResults = this.sortResults(dataList, kw, details);
+      if (!chineseResults.length) {
+        contentWrap.innerHTML = '<div class="pdb-sub-msg">未找到简中或繁中字幕，请尝试使用完整番号搜索</div>';
+        return;
+      }
+      this.renderTable({ container: contentWrap, dataList: chineseResults, previewBox, statusNode, overlay, details, getTargetCid, kw });
     };
 
     overlay.querySelector("#sub-search-btn").addEventListener("click", () => performSearch(input.value.trim()));
@@ -183,11 +182,86 @@ window.JavPackSubtitle = class JavPackSubtitle {
     performSearch(defaultKw);
   }
 
+  static requestText(url) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: "GET",
+        url,
+        onload: (res) => {
+          if (res.status >= 200 && res.status < 300) resolve(res.responseText || "");
+          else reject(new Error(`HTTP ${res.status}`));
+        },
+        onerror: () => reject(new Error("网络请求失败")),
+      });
+    });
+  }
+
+  static async searchXunlei(kw) {
+    const text = await this.requestText(`https://api-shoulei-ssl.xunlei.com/oracle/subtitle?name=${encodeURIComponent(kw)}`);
+    const root = JSON.parse(text);
+    if (root.code !== 0 || !Array.isArray(root.data)) return [];
+    return root.data.map((item) => ({ ...item, provider: "迅雷" }));
+  }
+
+  static async searchSubtitleCat(kw) {
+    const searchUrl = `${this.SUBTITLECAT_ORIGIN}/index.php?search=${encodeURIComponent(kw)}`;
+    const searchHtml = await this.requestText(searchUrl);
+    const entries = this.parseSubtitleCatSearch(searchHtml).slice(0, 20);
+    const languageGroups = await Promise.all(entries.map(async (entry) => {
+      try {
+        return this.parseSubtitleCatLanguages(await this.requestText(entry.detailUrl), entry);
+      } catch (_) {
+        return [];
+      }
+    }));
+    return languageGroups.flat();
+  }
+
+  static parseSubtitleCatSearch(html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    return [...doc.querySelectorAll("table.sub-table tbody tr")].flatMap((row) => {
+      const link = row.querySelector('a[href*="subs/"]');
+      const name = link?.textContent?.trim();
+      if (!link || !name) return [];
+      return [{
+        name,
+        detailUrl: new URL(link.getAttribute("href"), this.SUBTITLECAT_ORIGIN).href,
+      }];
+    });
+  }
+
+  static parseSubtitleCatLanguages(html, entry) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    return [...doc.querySelectorAll(".sub-single")].flatMap((node) => {
+      const languageCode = node.querySelector("img.flag")?.getAttribute("alt") || "";
+      const language = this.SUBTITLECAT_CHINESE_LANGUAGES.get(languageCode);
+      const link = node.querySelector("a.green-link[href$='.srt']");
+      if (!language || !link) return [];
+      return [{
+        name: entry.name,
+        languageCode,
+        languages: [language],
+        ext: "srt",
+        provider: "SubtitleCat",
+        url: new URL(link.getAttribute("href"), this.SUBTITLECAT_ORIGIN).href,
+      }];
+    });
+  }
+
+  static isWantedChineseSubtitle(item = {}) {
+    if (item.provider === "SubtitleCat") return this.SUBTITLECAT_CHINESE_LANGUAGES.has(item.languageCode);
+    const language = Array.isArray(item.languages) ? item.languages.join(" ") : String(item.languages || "");
+    const name = `${item.name || ""} ${item.extra_name || ""}`;
+    return /(zh[-_]?cn|zh[-_]?tw|chs|cht|chinese\s*(simplified|traditional)|简体|繁体|繁體|简中|繁中)/i.test(`${language} ${name}`);
+  }
+
   static sortResults(dataList, kw = "", details = {}) {
     const kwClean = kw.toLowerCase().replace(/[-_.\s]/g, "");
     const tokens = kw.toLowerCase().split(/[-_.\s]+/).filter((word) => word.length > 1);
     const codeClean = String(details.code || kw).toLowerCase().replace(/[-_.\s]/g, "");
-    return [...dataList].sort((a, b) => this.scoreResult(b, kwClean, tokens, codeClean) - this.scoreResult(a, kwClean, tokens, codeClean));
+    return [...dataList]
+      .filter((item) => this.isWantedChineseSubtitle(item))
+      .sort((a, b) => this.scoreResult(b, kwClean, tokens, codeClean) - this.scoreResult(a, kwClean, tokens, codeClean));
   }
 
   static scoreResult(item, kwClean, tokens, codeClean = "") {
@@ -200,7 +274,7 @@ window.JavPackSubtitle = class JavPackSubtitle {
       if (name.includes(token)) score += 50;
     });
     if (kwClean && compactName.includes(kwClean)) score += 500;
-    if (/(zh|cn|chs|cht|chinese)/i.test(lang) || /(zh|cn|chs|cht|chinese)/i.test(name)) score += 100;
+    if (/(zh|cn|chs|cht|chinese|简中|繁中)/i.test(lang) || /(zh|cn|chs|cht|chinese|简中|繁中)/i.test(name)) score += 100;
     if (item.ext === "srt" || item.ext === "ass") score += 20;
     return score;
   }
@@ -213,6 +287,7 @@ window.JavPackSubtitle = class JavPackSubtitle {
       <table class="pdb-sub-table">
         <thead>
           <tr>
+            <th class="pdb-sub-th" style="width: 90px;">来源</th>
             <th class="pdb-sub-th">原始字幕名称</th>
             <th class="pdb-sub-th" style="width: 80px;">语言</th>
             <th class="pdb-sub-th" style="width: 60px;">格式</th>
@@ -233,9 +308,12 @@ window.JavPackSubtitle = class JavPackSubtitle {
   static renderRow(item, index, highlightRegex) {
     const lang = item.languages?.[0] || "未知";
     const name = item.name || item.extra_name || "未知字幕";
+    const provider = item.provider || "迅雷";
+    const providerClass = provider === "SubtitleCat" ? "pdb-sub-provider--subtitlecat" : "pdb-sub-provider--xunlei";
     const displayName = highlightRegex ? this.escapeHtml(name).replace(highlightRegex, '<span style="color:#e74c3c; font-weight:bold;">$1</span>') : this.escapeHtml(name);
     return `
       <tr class="pdb-sub-tr">
+        <td class="pdb-sub-td-provider"><span class="pdb-sub-provider ${providerClass}">${this.escapeHtml(provider)}</span></td>
         <td class="pdb-sub-td">${displayName}</td>
         <td class="pdb-sub-td-lang">${this.escapeHtml(lang)}</td>
         <td class="pdb-sub-td-ext">${this.escapeHtml(item.ext || "srt")}</td>
