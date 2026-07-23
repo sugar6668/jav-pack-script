@@ -531,12 +531,13 @@ html.x-score-filter-active .movie-list .item.x-score-filtered {
         justify-content: center;
         min-width: 2em;
         height: auto;
-        padding: 0 0.45em;
+        padding: 0;
         color: var(--x-warning);
+        background-color: transparent;
 
         svg {
-          width: 1em;
-          height: 1em;
+          width: 2em;
+          height: 2em;
         }
       }
 
