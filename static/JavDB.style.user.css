@@ -431,7 +431,11 @@ html.x-actor-matched-only .movie-list .item:not(:has(.x-match:not(.is-normal))) 
 
     /* 新增：多色渐变边框支持 */
     &.x-multi-matched {
-      border: none !important;
+      /* Keep the same frame width and box geometry as a one-colour match.
+         `border: none` made the gradient card wider and its radius no longer
+         matched the value configured by JavDB.layout. */
+      border: 0.375rem solid transparent !important;
+      border-radius: var(--x-layout-match-radius);
       box-shadow: none !important;
     }
 

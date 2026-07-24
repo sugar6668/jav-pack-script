@@ -324,7 +324,12 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           btn.setAttribute("disabled", "");
         } else if (action === "delv" || action === "delf") {
           await this.deleteMatched({ req115, item, action });
-          options.removeFromCache?.(item, action);
+          const cache = options.removeFromCache?.(item, action);
+          // Detail views run in the quick-view iframe.  Send the exact
+          // post-delete cache snapshot back to the source card instead of
+          // waiting for a new 115 search (which can briefly return deleted
+          // files while indexing catches up).
+          options.syncCache?.(cache);
           if (action === "delf") {
             // 删除文件夹会同时删除该目录下的所有匹配项；同步移除整组行，避免只消失当前行而显示旧结果。
             root.querySelectorAll(".zymatch-item").forEach((node) => {

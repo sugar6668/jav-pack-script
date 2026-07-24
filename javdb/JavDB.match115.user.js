@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.4
+// @version         0.0.5
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -312,9 +312,12 @@ const getPageDetails = (dom = document) => {
         if (action === "delf") return String(file.cid) !== String(item.cid);
         return true;
       });
-      if (next.length > 0) MatchCache.set(code, next);
-      else MatchCache.del(code);
+      // Preserve an explicit empty result.  Deleting it would make the parent
+      // card immediately search 115 again and briefly restore a stale frame.
+      MatchCache.set(code, next);
+      return next;
     },
+    syncCache: (data) => CHANNEL.postMessage({ type: "sync", code, data: Array.isArray(data) ? data : [] }),
     invalidateCache: () => MatchCache.del(code),
     refresh: () => matcher(true),
   });
@@ -533,7 +536,12 @@ const getPageDetails = (dom = document) => {
   };
   new MutationObserver((records) => records.forEach((record) => matchDynamicCards(record.addedNodes)))
     .observe(document.body, { childList: true, subtree: true });
-  CHANNEL.onmessage = ({ data }) => matchQueue(document.querySelectorAll(`.${parseCodeCls(data)}`), { force: true });
+  CHANNEL.onmessage = ({ data }) => {
+    const payload = typeof data === "string" ? { code: data } : data;
+    if (!payload?.code) return;
+    if (payload.type === "sync" && Array.isArray(payload.data)) MatchCache.set(payload.code, payload.data);
+    matchQueue(document.querySelectorAll(`.${parseCodeCls(payload.code)}`), { force: true });
+  };
 
   const publish = (code) => {
     // A manual refresh deliberately replaces an already resolved result.
