@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.filter
 // @namespace       JavDB.filter@blc
-// @version         0.0.10
+// @version         0.0.11
 // @author          blc
 // @description     评分筛选与性癖净化
 // @match           https://javdb.com/*
@@ -20,6 +20,7 @@
 
   let scoreFilterEnabled = true;
   let actorMatchedOnly = false;
+  let actorMatchLoadQueued = false;
 
   const SCORE_CONFIG = {
     lowOpacity: "10%",
@@ -214,10 +215,36 @@
     button.setAttribute("aria-pressed", String(actorMatchedOnly));
   };
 
+  const queueMoreActorWorksIfNeeded = () => {
+    if (!actorMatchedOnly || !isActorWorksPage() || actorMatchLoadQueued) return;
+
+    const items = [...document.querySelectorAll(".movie-list .item")];
+    const allItemsProcessed = items.length && items.every((item) => item.querySelector(".x-match"));
+    const hasMatchedItems = items.some((item) => item.querySelector(".x-match:not(.is-normal)"));
+    if (!allItemsProcessed || hasMatchedItems) return;
+
+    const loadButton = document.querySelector(".x-load");
+    if (!loadButton || /\u6682\u65e0\u66f4\u591a/.test(loadButton.textContent)) return;
+    if (loadButton.classList.contains("is-loading") || loadButton.disabled) {
+      actorMatchLoadQueued = true;
+      setTimeout(() => {
+        actorMatchLoadQueued = false;
+        queueMoreActorWorksIfNeeded();
+      }, 100);
+      return;
+    }
+    actorMatchLoadQueued = true;
+    requestAnimationFrame(() => {
+      actorMatchLoadQueued = false;
+      loadButton.click();
+    });
+  };
+
   const setActorMatchedOnly = (enabled) => {
     actorMatchedOnly = enabled;
     document.documentElement.classList.toggle("x-actor-matched-only", enabled);
     updateActorMatchToggle();
+    queueMoreActorWorksIfNeeded();
   };
 
   const initActorMatchToggle = () => {
@@ -286,7 +313,17 @@
   }
 
   processCards(document.querySelectorAll(".movie-list .item"));
-  window.addEventListener("JavDB.scroll", ({ detail }) => processCards(detail || []));
+  window.addEventListener("JavDB.scroll", ({ detail }) => {
+    processCards(detail || []);
+    queueMoreActorWorksIfNeeded();
+  });
+  if (isActorWorksPage()) {
+    new MutationObserver((mutations) => {
+      if (mutations.some(({ type, target }) => type === "childList" || target.classList?.contains("x-match"))) {
+        queueMoreActorWorksIfNeeded();
+      }
+    }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+  }
   document.addEventListener("contextmenu", (event) => {
     const item = event.target.closest(".movie-list .item");
     if (!item) return;
