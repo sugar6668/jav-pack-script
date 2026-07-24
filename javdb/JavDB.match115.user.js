@@ -270,6 +270,13 @@ const getPageDetails = (dom = document) => {
   const code = CONT.querySelector(".first-block .value").textContent.trim();
   const codeDetails = getPageDetails() || Util.codeParse(code);
   const block = addBlock();
+  const syncQuickViewState = (operation, data) => {
+    const payload = { source: "JavDB.match115", type: "sync", id: crypto.randomUUID(), operation, code, data: Array.isArray(data) ? data : [] };
+    CHANNEL.postMessage(payload);
+    // Quick View can remove the iframe before BroadcastChannel dispatches.
+    // Send the same state directly to its same-origin parent as well.
+    if (window.parent !== window) window.parent.postMessage(payload, location.origin);
+  };
   const matcher = (force = false) => {
     const cache = force ? null : MatchCache.get(code);
     if (cache !== null) {
@@ -312,11 +319,22 @@ const getPageDetails = (dom = document) => {
         if (action === "delf") return String(file.cid) !== String(item.cid);
         return true;
       });
-      if (next.length > 0) MatchCache.set(code, next);
-      else MatchCache.del(code);
+      // An empty result is meaningful after deleting the final match.  Keeping
+      // it prevents the source card from briefly rediscovering stale index data.
+      MatchCache.set(code, next);
+      return next;
     },
+    syncCache: (data) => syncQuickViewState("delete", data),
     invalidateCache: () => MatchCache.del(code),
     refresh: () => matcher(true),
+  });
+  window.addEventListener("JavDB_SubtitleUploaded", ({ detail }) => {
+    if (detail?.code && String(detail.code).trim().toUpperCase() !== String(code).trim().toUpperCase()) return;
+    const cid = String(detail?.cid || "");
+    const cache = MatchCache.get(code) || [];
+    const next = cache.map((file) => String(file.cid) === cid ? { ...file, hasSubtitle: true } : file);
+    MatchCache.set(code, next);
+    syncQuickViewState("subtitle", next);
   });
   window.addEventListener("beforeunload", () => CHANNEL.postMessage(code));
 })();
@@ -516,6 +534,7 @@ const getPageDetails = (dom = document) => {
   };
 
   const matchQueue = useMatchQueue(matchBefore, matchAfter);
+  const handledSyncs = new Set();
   matchQueue(movieList);
 
   window.addEventListener("JavDB.scroll", ({ detail }) => matchQueue(detail));
@@ -533,7 +552,24 @@ const getPageDetails = (dom = document) => {
   };
   new MutationObserver((records) => records.forEach((record) => matchDynamicCards(record.addedNodes)))
     .observe(document.body, { childList: true, subtree: true });
-  CHANNEL.onmessage = ({ data }) => matchQueue(document.querySelectorAll(`.${parseCodeCls(data)}`), { force: true });
+  const receiveMatchState = (data) => {
+    const payload = typeof data === "string" ? { code: data } : data;
+    if (!payload?.code) return;
+    if (payload.id && handledSyncs.has(payload.id)) return;
+    if (payload.id) {
+      handledSyncs.add(payload.id);
+      setTimeout(() => handledSyncs.delete(payload.id), 30 * 1000);
+    }
+    if (payload.type === "sync" && Array.isArray(payload.data)) {
+      MatchCache.set(payload.code, payload.data);
+      window.dispatchEvent(new CustomEvent("JavDB_MatchCacheSynced", { detail: { code: payload.code, operation: payload.operation } }));
+    }
+    matchQueue(document.querySelectorAll(`.${parseCodeCls(payload.code)}`), { force: true });
+  };
+  CHANNEL.onmessage = ({ data }) => receiveMatchState(data);
+  window.addEventListener("message", ({ data, origin }) => {
+    if (origin === location.origin && data?.source === "JavDB.match115") receiveMatchState(data);
+  });
 
   const publish = (code) => {
     // A manual refresh deliberately replaces an already resolved result.

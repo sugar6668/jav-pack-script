@@ -17,6 +17,8 @@
 
   const quickView = new window.JavPackQuickView();
   const ensure = () => quickView.ensureButtons(document);
+  const syncedDeletes = new Map();
+  const getCode = (card) => card?.querySelector(".video-title strong")?.textContent.trim().toUpperCase();
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", ensure, { once: true });
@@ -34,9 +36,23 @@
       });
     });
   }).observe(document.body, { childList: true, subtree: true });
+  window.addEventListener("JavDB_MatchCacheSynced", ({ detail }) => {
+    if (detail?.operation !== "delete") return;
+    const code = String(detail.code || "").trim().toUpperCase();
+    if (code) syncedDeletes.set(code, Date.now());
+  });
   window.addEventListener("JavDB_QuickView_Closed", ({ detail }) => {
-    const matchNode = detail?.card?.querySelector(".x-match");
+    const card = detail?.card;
+    const matchNode = card?.querySelector(".x-match");
     if (!matchNode) return;
+    const code = getCode(card);
+    const syncedAt = syncedDeletes.get(code);
+    // Delete state was copied from the iframe; querying immediately can show a
+    // just-deleted file until the 115 index has caught up.
+    if (syncedAt && Date.now() - syncedAt < 10 * 1000) {
+      syncedDeletes.delete(code);
+      return;
+    }
     setTimeout(() => unsafeWindow.reMatch?.(matchNode), 400);
   });
 })();
