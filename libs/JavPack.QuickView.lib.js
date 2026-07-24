@@ -1,8 +1,17 @@
+/**
+ * @name JavPack Quick View Library
+ * @description JavDB 瀑布流卡片的小窗 iframe 预览与关闭回调模块。
+ */
 window.JavPackQuickView = class JavPackQuickView {
   static CARD_SELECTOR = '.movie-list .item:not([data-qv-processed="1"])';
   static DETAIL_LINK_SELECTOR = 'a[href*="/v/"]';
   static OVERLAY_ID = "javdb-quick-view-modal";
   static prefetched = new Set();
+
+  constructor({ onClose } = {}) {
+    this.onClose = onClose;
+    this.closeActive = null;
+  }
 
   ensureButtons(doc = document) {
     if (window.self !== window.top) return;
@@ -46,7 +55,10 @@ window.JavPackQuickView = class JavPackQuickView {
 
   openIframeModal(url, sourceCard) {
     const existed = document.getElementById(this.constructor.OVERLAY_ID);
-    if (existed) existed.remove();
+    // Closing a previous preview through the same path matters: its source
+    // card may have changed in the iframe and must receive its refresh hook.
+    if (existed) this.closeActive?.("replace");
+    else existed?.remove();
 
     const originalOverflow = document.body.style.overflow || "";
     document.body.style.overflow = "hidden";
@@ -74,11 +86,20 @@ window.JavPackQuickView = class JavPackQuickView {
     iframe.setAttribute("fetchpriority", "high");
     iframe.src = url;
 
-    const closeModal = () => {
+    let closed = false;
+    const closeModal = (reason = "close") => {
+      if (closed) return;
+      closed = true;
       overlay.remove();
       document.body.style.overflow = originalOverflow;
-      window.dispatchEvent(new CustomEvent("JavDB_QuickView_Closed", { detail: { card: sourceCard } }));
+      this.closeActive = null;
+      const detail = { card: sourceCard, reason };
+      // Invoke the owner callback directly.  CustomEvent delivery across
+      // userscript sandboxes is not reliable enough to be the only close hook.
+      this.onClose?.(detail);
+      window.dispatchEvent(new CustomEvent("JavDB_QuickView_Closed", { detail }));
     };
+    this.closeActive = closeModal;
 
     closeBtn.onclick = closeModal;
     overlay.addEventListener("click", (event) => {
