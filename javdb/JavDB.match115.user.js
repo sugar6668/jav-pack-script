@@ -539,7 +539,12 @@ const getPageDetails = (dom = document) => {
   CHANNEL.onmessage = ({ data }) => {
     const payload = typeof data === "string" ? { code: data } : data;
     if (!payload?.code) return;
-    if (payload.type === "sync" && Array.isArray(payload.data)) MatchCache.set(payload.code, payload.data);
+    if (payload.type === "sync" && Array.isArray(payload.data)) {
+      MatchCache.set(payload.code, payload.data);
+      // Let QuickView distinguish a delete-cache sync from normal operations
+      // such as subtitle upload, which still need a close-triggered re-match.
+      window.dispatchEvent(new CustomEvent("JavDB_MatchCacheSynced", { detail: { code: payload.code } }));
+    }
     matchQueue(document.querySelectorAll(`.${parseCodeCls(payload.code)}`), { force: true });
   };
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.quickView
 // @namespace       JavDB.quickView@blc
-// @version         0.0.2
+// @version         0.0.3
 // @author          blc
 // @description     JavDB 瀑布流小窗预览
 // @match           https://javdb.com/*
@@ -9,13 +9,16 @@
 // @icon            https://javdb.com/favicon.ico
 // @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.QuickView.lib.js
 // @run-at          document-end
+// @grant           unsafeWindow
 // ==/UserScript==
 
 (function () {
   if (!window.JavPackQuickView) return;
 
   const quickView = new window.JavPackQuickView();
+  const syncedDeletes = new Map();
   const ensure = () => quickView.ensureButtons(document);
+  const getCode = (card) => card?.querySelector(".video-title strong")?.textContent.trim().toUpperCase();
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", ensure, { once: true });
@@ -33,7 +36,24 @@
       });
     });
   }).observe(document.body, { childList: true, subtree: true });
-  // JavDB.match115 synchronizes operation results from the detail iframe to
-  // the source card through BroadcastChannel.  A close-triggered re-search is
-  // deliberately omitted because 115 can briefly return deleted files.
+  window.addEventListener("JavDB_MatchCacheSynced", ({ detail }) => {
+    const code = String(detail?.code || "").trim().toUpperCase();
+    if (code) syncedDeletes.set(code, Date.now());
+  });
+  window.addEventListener("JavDB_QuickView_Closed", ({ detail }) => {
+    const card = detail?.card;
+    const matchNode = card?.querySelector(".x-match");
+    if (!matchNode) return;
+
+    const code = getCode(card);
+    const syncedAt = syncedDeletes.get(code);
+    // Deletion already supplied an exact cache snapshot to the source card;
+    // avoid a stale 115 index response.  All other operations, especially
+    // subtitle upload, retain the established close -> reMatch flow.
+    if (syncedAt && Date.now() - syncedAt < 10 * 1000) {
+      syncedDeletes.delete(code);
+      return;
+    }
+    setTimeout(() => unsafeWindow.reMatch?.(matchNode), 400);
+  });
 })();
