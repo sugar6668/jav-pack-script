@@ -429,16 +429,6 @@ html.x-actor-matched-only .movie-list .item:not(:has(.x-match:not(.is-normal))) 
       border-color: var(--x-danger-bd);
     }
 
-    /* 新增：多色渐变边框支持 */
-    &.x-multi-matched {
-      /* Keep the same frame width and box geometry as a one-colour match.
-         `border: none` made the gradient card wider and its radius no longer
-         matched the value configured by JavDB.layout. */
-      border: 0.375rem solid transparent !important;
-      border-radius: var(--x-layout-match-radius);
-      box-shadow: none !important;
-    }
-
     .cover {
       padding-top: 67.25%;
       overflow: hidden;
@@ -1669,25 +1659,15 @@ br + .title {
   color: #dc3545;
 }
 .movie-list .item.x-multi-matched {
-  background-color: transparent !important;
-  border-color: transparent !important;
   position: relative;
-  /* Same outer geometry as a single-colour 0.375rem match frame. */
+  /* Render the gradient as a real border layer.  This gives it the same box,
+     outer radius and rounded inner edge as the normal solid match border. */
+  border: 0.375rem solid transparent !important;
   border-radius: var(--x-layout-match-radius);
-}
-
-.movie-list .item.x-multi-matched::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  padding: 0.375rem;
-  background: var(--multi-match-bg) !important;
-  border-radius: var(--x-layout-match-radius);
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-  z-index: 2;
+  box-shadow: none !important;
+  background:
+    linear-gradient(var(--body-background-color, #fff), var(--body-background-color, #fff)) padding-box,
+    var(--multi-match-bg) border-box !important;
 }
 
 .movie-list .item .cover .x-qv-button {
