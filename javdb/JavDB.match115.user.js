@@ -273,8 +273,8 @@ const getPageDetails = (dom = document) => {
   const syncQuickViewState = (operation, data) => {
     const payload = { source: "JavDB.match115", type: "sync", id: crypto.randomUUID(), operation, code, data: Array.isArray(data) ? data : [] };
     CHANNEL.postMessage(payload);
-    // Quick View can remove the iframe before BroadcastChannel dispatches.
-    // Send the same state directly to its same-origin parent as well.
+    // Same-origin parent messaging is an immediate fallback for QuickView;
+    // BroadcastChannel delivery can otherwise race with iframe removal.
     if (window.parent !== window) window.parent.postMessage(payload, location.origin);
   };
   const matcher = (force = false) => {
@@ -319,8 +319,8 @@ const getPageDetails = (dom = document) => {
         if (action === "delf") return String(file.cid) !== String(item.cid);
         return true;
       });
-      // An empty result is meaningful after deleting the final match.  Keeping
-      // it prevents the source card from briefly rediscovering stale index data.
+      // Preserve an explicit empty result.  Deleting it would make the parent
+      // card immediately search 115 again and briefly restore a stale frame.
       MatchCache.set(code, next);
       return next;
     },
@@ -523,6 +523,10 @@ const getPageDetails = (dom = document) => {
 
     const obs = new IntersectionObserver(callback, { threshold: 0.25 });
     return (nodeList, { force = false } = {}) => nodeList.forEach((node) => {
+      // A forced refresh commonly comes from Quick View closing.  The card is
+      // already in the viewport and has been unobserved, so it must bypass
+      // IntersectionObserver and enter the queue directly.
+      if (force) return requestAnimationFrame(() => dispatch(node, true));
       // Matched-only actor mode hides unmatched cards, so they never intersect.
       // Queue them immediately to resolve their match state before CSS decides visibility.
       if (document.documentElement.classList.contains("x-actor-matched-only")) {
@@ -562,7 +566,9 @@ const getPageDetails = (dom = document) => {
     }
     if (payload.type === "sync" && Array.isArray(payload.data)) {
       MatchCache.set(payload.code, payload.data);
-      window.dispatchEvent(new CustomEvent("JavDB_MatchCacheSynced", { detail: { code: payload.code, operation: payload.operation } }));
+      // Let QuickView distinguish a delete-cache sync from normal operations
+      // such as subtitle upload, which still need a close-triggered re-match.
+      window.dispatchEvent(new CustomEvent("JavDB_MatchCacheSynced", { detail: { code: payload.code } }));
     }
     matchQueue(document.querySelectorAll(`.${parseCodeCls(payload.code)}`), { force: true });
   };
