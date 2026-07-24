@@ -319,6 +319,33 @@ html.x-score-filter-active .movie-list .item.x-score-filtered {
   border-color: #cfd8e6;
 }
 
+
+/* JavDB.filter: actor works may be narrowed to cards matched by JavDB.match115. */
+html.x-actor-matched-only .movie-list .item:not(:has(.x-match:not(.is-normal))) {
+  display: none !important;
+}
+
+.toolbar .x-actor-match-toggle {
+  min-width: 6.5em;
+  margin-bottom: 0.5rem;
+  margin-left: 0.25rem;
+  font-size: var(--x-size-sm);
+  font-weight: 600;
+  transition: var(--x-trans);
+}
+
+.toolbar .x-actor-match-toggle.is-match-active {
+  color: #fff;
+  background-color: var(--x-success);
+  border-color: var(--x-success);
+}
+
+.toolbar .x-actor-match-toggle.is-match-inactive {
+  color: #596579;
+  background-color: #fff;
+  border-color: #cfd8e6;
+}
+
 .toolbar {
   padding: 0 0 0.5rem;
   font-size: 0;

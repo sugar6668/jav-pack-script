@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.filter
 // @namespace       JavDB.filter@blc
-// @version         0.0.9
+// @version         0.0.10
 // @author          blc
 // @description     评分筛选与性癖净化
 // @match           https://javdb.com/*
@@ -16,8 +16,10 @@
   const MANUAL_BLOCK_STORAGE_KEY = "manualBlockedMovies";
   const MENU_ID = "javdb-filter-menu";
   const FILTER_TOGGLE_ID = "x-score-filter-toggle";
+  const ACTOR_MATCH_TOGGLE_ID = "x-actor-match-toggle";
 
   let scoreFilterEnabled = true;
+  let actorMatchedOnly = false;
 
   const SCORE_CONFIG = {
     lowOpacity: "10%",
@@ -37,13 +39,13 @@
     blockedIDs: [],
     blockedTitleKeywords: {
       "重口排泄": ["大便", "尿", "粪", "浣肠", "失禁", "排泄", "失便", "唾"],
-      "SM与调教": ["虐", "奴", "调教", "拷问", "レイプ", "sm", "m男"],
+      "SM与调教": ["虐","レイプ", "sm", "m男"],
       "身体特征": ["剛毛", "鼻", "アナル"],
       "年龄体型": ["熟女"],
       "伪娘男娘": ["男の娘", "男娘", "偽娘", "伪娘", "女装男子", "女装子", "ニューハーフ", "ふたなり", "futanari"],
     },
     blockedTags: {
-      "题材类别": ["熟女", "人妻", "痴女"],
+      "题材类别": ["熟女",],
       "重口类别": ["排泄", "猎奇"],
       "跨性别伪娘": ["男の娘", "cross dressing", "cross-dressing", "女装", "ニューハーフ", "transsexual", "shemale", "futanari", "ふたなり"],
     },
@@ -201,6 +203,40 @@
     return true;
   };
 
+  const isActorWorksPage = () => location.pathname.startsWith("/actors/");
+
+  const updateActorMatchToggle = () => {
+    const button = document.getElementById(ACTOR_MATCH_TOGGLE_ID);
+    if (!button) return;
+    button.textContent = actorMatchedOnly ? "\u663e\u793a\u5df2\u5339\u914d" : "\u663e\u793a\u5168\u90e8";
+    button.classList.toggle("is-match-active", actorMatchedOnly);
+    button.classList.toggle("is-match-inactive", !actorMatchedOnly);
+    button.setAttribute("aria-pressed", String(actorMatchedOnly));
+  };
+
+  const setActorMatchedOnly = (enabled) => {
+    actorMatchedOnly = enabled;
+    document.documentElement.classList.toggle("x-actor-matched-only", enabled);
+    updateActorMatchToggle();
+  };
+
+  const initActorMatchToggle = () => {
+    if (!isActorWorksPage()) return true;
+    const toolbar = document.querySelector(".toolbar");
+    if (!toolbar || document.getElementById(ACTOR_MATCH_TOGGLE_ID)) return Boolean(toolbar);
+
+    const toggle = document.createElement("button");
+    toggle.id = ACTOR_MATCH_TOGGLE_ID;
+    toggle.type = "button";
+    toggle.className = "button is-small x-actor-match-toggle";
+    toggle.addEventListener("click", () => setActorMatchedOnly(!actorMatchedOnly));
+    toolbar.append(toggle);
+    updateActorMatchToggle();
+    return true;
+  };
+
+  const initToolbarControls = () => initScoreFilterToggle() && initActorMatchToggle();
+
   const closeBlockMenu = () => document.getElementById(MENU_ID)?.remove();
 
   const showBlockMenu = (event, item) => {
@@ -240,9 +276,10 @@
   };
 
   setScoreFilterEnabled(true);
-  if (!initScoreFilterToggle()) {
+  setActorMatchedOnly(false);
+  if (!initToolbarControls()) {
     const toolbarObserver = new MutationObserver(() => {
-      if (!initScoreFilterToggle()) return;
+      if (!initToolbarControls()) return;
       toolbarObserver.disconnect();
     });
     toolbarObserver.observe(document.body, { childList: true, subtree: true });
