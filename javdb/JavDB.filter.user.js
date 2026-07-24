@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.filter
 // @namespace       JavDB.filter@blc
-// @version         0.0.11
+// @version         0.0.12
 // @author          blc
 // @description     评分筛选与性癖净化
 // @match           https://javdb.com/*
@@ -215,13 +215,8 @@
     button.setAttribute("aria-pressed", String(actorMatchedOnly));
   };
 
-  const queueMoreActorWorksIfNeeded = () => {
+  const requestNextActorWorksPage = () => {
     if (!actorMatchedOnly || !isActorWorksPage() || actorMatchLoadQueued) return;
-
-    const items = [...document.querySelectorAll(".movie-list .item")];
-    const allItemsProcessed = items.length && items.every((item) => item.querySelector(".x-match"));
-    const hasMatchedItems = items.some((item) => item.querySelector(".x-match:not(.is-normal)"));
-    if (!allItemsProcessed || hasMatchedItems) return;
 
     const loadButton = document.querySelector(".x-load");
     if (!loadButton || /\u6682\u65e0\u66f4\u591a/.test(loadButton.textContent)) return;
@@ -229,7 +224,7 @@
       actorMatchLoadQueued = true;
       setTimeout(() => {
         actorMatchLoadQueued = false;
-        queueMoreActorWorksIfNeeded();
+        requestNextActorWorksPage();
       }, 100);
       return;
     }
@@ -238,6 +233,22 @@
       actorMatchLoadQueued = false;
       loadButton.click();
     });
+  };
+
+  const queueMoreActorWorksIfNeeded = () => {
+    if (!actorMatchedOnly || !isActorWorksPage()) return;
+
+    const items = [...document.querySelectorAll(".movie-list .item")];
+    const allItemsProcessed = items.length && items.every((item) => item.querySelector(".x-match"));
+    const hasMatchedItems = items.some((item) => item.querySelector(".x-match:not(.is-normal)"));
+    if (!allItemsProcessed || hasMatchedItems) return;
+    requestNextActorWorksPage();
+  };
+
+  const loadMoreActorWorksAtPageEnd = () => {
+    if (!actorMatchedOnly || !isActorWorksPage()) return;
+    const pageEnd = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+    if (window.scrollY + window.innerHeight >= pageEnd - 300) requestNextActorWorksPage();
   };
 
   const setActorMatchedOnly = (enabled) => {
@@ -324,6 +335,10 @@
       }
     }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
   }
+  window.addEventListener("scroll", loadMoreActorWorksAtPageEnd, { passive: true });
+  window.addEventListener("wheel", (event) => {
+    if (event.deltaY > 0) loadMoreActorWorksAtPageEnd();
+  }, { passive: true });
   document.addEventListener("contextmenu", (event) => {
     const item = event.target.closest(".movie-list .item");
     if (!item) return;
