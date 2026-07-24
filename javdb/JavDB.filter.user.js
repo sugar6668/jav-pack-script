@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.filter
 // @namespace       JavDB.filter@blc
-// @version         0.0.12
+// @version         0.0.14
 // @author          blc
 // @description     评分筛选与性癖净化
 // @match           https://javdb.com/*
@@ -230,8 +230,15 @@
     }
     actorMatchLoadQueued = true;
     requestAnimationFrame(() => {
-      actorMatchLoadQueued = false;
       loadButton.click();
+      // Hold the gate until JavDB.scroll has finished its asynchronous fetch;
+      // wheel/scroll events otherwise enqueue duplicate page requests.
+      const release = () => {
+        if (loadButton.classList.contains("is-loading")) return setTimeout(release, 50);
+        actorMatchLoadQueued = false;
+        queueMoreActorWorksIfNeeded();
+      };
+      setTimeout(release, 0);
     });
   };
 
@@ -336,9 +343,6 @@
     }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
   }
   window.addEventListener("scroll", loadMoreActorWorksAtPageEnd, { passive: true });
-  window.addEventListener("wheel", (event) => {
-    if (event.deltaY > 0) loadMoreActorWorksAtPageEnd();
-  }, { passive: true });
   document.addEventListener("contextmenu", (event) => {
     const item = event.target.closest(".movie-list .item");
     if (!item) return;

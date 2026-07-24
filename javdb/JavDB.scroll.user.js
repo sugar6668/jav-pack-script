@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.scroll
 // @namespace       JavDB.scroll@blc
-// @version         0.0.2
+// @version         0.0.3
 // @author          blc
 // @description     滚动加载
 // @match           https://javdb.com/*
@@ -90,12 +90,18 @@
         }
 
         _next = next;
-        _list = list;
+        // Keep every already appended card in the de-duplication set.  Using
+        // only the previous response lets an overlapping later response append
+        // cards that were present on an earlier actor-works page.
+        _list = [..._list, ...detail];
       } catch (err) {
         Util.print(err?.message);
         target.removeAttribute("disabled");
       } finally {
         target.classList.remove(loadCls);
+        // A successful page request used to leave the button disabled.  That
+        // blocks the matched-only actor view from requesting the next page.
+        if (!/\u6682\u65e0\u66f4\u591a/.test(target.textContent)) target.removeAttribute("disabled");
       }
     };
   };

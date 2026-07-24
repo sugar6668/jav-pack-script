@@ -66,6 +66,21 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     };
   }
 
+  static subtitleStem(name = "") {
+    // Keep only subtitles belonging to the selected video.  A collection
+    // directory can contain subtitles for several titles, all of which share
+    // the same cid.
+    return this.sanitizeName(String(name).replace(/\.[^.]+$/, ""))
+      .replace(/(?:[._ -](?:cd|disc|part|pt|ep|e)\d+)(?:[._ -].*)?$/i, "")
+      .toLowerCase();
+  }
+
+  static belongsToVideoSubtitle(video = {}, subtitle = {}) {
+    const videoStem = this.subtitleStem(video.n || video.name || video.file_name || "");
+    const subtitleStem = this.subtitleStem(subtitle.n || subtitle.name || subtitle.file_name || "");
+    return Boolean(videoStem && subtitleStem && (subtitleStem === videoStem || subtitleStem.startsWith(`${videoStem}.`) || subtitleStem.startsWith(`${videoStem} `) || subtitleStem.startsWith(`${videoStem}-`)));
+  }
+
   static async enrichMetadata(items = [], req115) {
     const cids = [...new Set(items.filter((item) => item?.cid && (!item.realPath || !item.paths?.length || item.hasCover === undefined || item.hasSubtitle === undefined)).map((item) => item.cid))];
     const entries = await Promise.all(cids.map(async (cid) => [cid, await this.resolveMetadata(req115, cid).catch(() => ({ realPath: "", hasCover: false, hasSubtitle: false }))]));
@@ -181,7 +196,11 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     if (!targetCid) throw new Error("目标目录创建失败");
 
     const { data: srts = [] } = await req115.filesAllSRTs(file.cid);
-    const files = [file, ...srts.map((srt) => this.normalizeFile(srt))];
+    // `filesAllSRTs(cid)` returns every SRT in the folder.  Filter it by the
+    // chosen video's basename so archiving one title from a collection never
+    // moves its neighbours' subtitles.
+    const subtitles = srts.filter((srt) => this.belongsToVideoSubtitle(file, srt));
+    const files = [file, ...subtitles.map((srt) => this.normalizeFile(srt))];
 
     if (String(file.cid) !== String(targetCid)) {
       const moveRes = await req115.filesMove(files.map((it) => it.fid), targetCid);
