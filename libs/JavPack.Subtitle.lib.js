@@ -200,7 +200,41 @@ window.JavPackSubtitle = class JavPackSubtitle {
     const text = await this.requestText(`https://api-shoulei-ssl.xunlei.com/oracle/subtitle?name=${encodeURIComponent(kw)}`);
     const root = JSON.parse(text);
     if (root.code !== 0 || !Array.isArray(root.data)) return [];
-    return root.data.map((item) => ({ ...item, provider: "迅雷" }));
+    const results = root.data.slice(0, 20).map((item) => this.normalizeXunleiResult(item));
+    const labeledResults = await Promise.all(results.map((item) => this.labelXunleiChineseSubtitle(item)));
+    return labeledResults.filter(Boolean);
+  }
+
+  static normalizeXunleiResult(item = {}) {
+    const rawLanguages = item.languages ?? item.Languages ?? item.langs ?? item.Langs ?? item.language ?? item.Language ?? [];
+    return {
+      ...item,
+      name: item.name || item.Name || item.extra_name || item.Title || "",
+      languages: Array.isArray(rawLanguages) ? rawLanguages : (rawLanguages ? [String(rawLanguages)] : []),
+      ext: item.ext || item.Ext || item.format || item.Format || "srt",
+      url: item.url || item.Url || "",
+      provider: "迅雷",
+    };
+  }
+
+  static async labelXunleiChineseSubtitle(item) {
+    if (this.isWantedChineseSubtitle(item)) return item;
+    if (!item.url) return null;
+    try {
+      const language = this.detectChineseSubtitleLanguage(this.decodeSubtitle(await this.fetchBinaryCached(item.url)));
+      return language ? { ...item, languages: [language] } : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static detectChineseSubtitleLanguage(text = "") {
+    const sample = String(text).slice(0, 12000);
+    if (!/[\u3400-\u9fff]/.test(sample)) return "";
+    const simplifiedCount = (sample.match(/[为与个么开关东风头后发这边过还进时样气应实话说问题现经体万台农国门书车云]/g) || []).length;
+    const traditionalCount = (sample.match(/[為與個麼開關東風頭後發這邊過還進時樣氣應實話說問題現經體萬臺農國門書車雲]/g) || []).length;
+    if (simplifiedCount === 0 && traditionalCount === 0) return "";
+    return traditionalCount > simplifiedCount ? "繁中" : "简中";
   }
 
   static async searchSubtitleCat(kw) {
