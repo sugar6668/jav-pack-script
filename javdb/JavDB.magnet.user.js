@@ -43,7 +43,7 @@ Util.upStore();
   const getScreenshots = (data) => {
     const screenshots = Array.isArray(data?.screenshots) ? data.screenshots : [];
     return screenshots
-      .map((item) => (typeof item === "string" ? item : item?.url ?? item?.src ?? item?.image))
+      .map((item) => (typeof item === "string" ? item : item?.screenshot ?? item?.url ?? item?.src ?? item?.image))
       .filter(Boolean);
   };
 
@@ -52,21 +52,23 @@ Util.upStore();
     const modal = document.createElement("div");
     modal.className = "x-magnet-preview-modal";
     modal.innerHTML = `
-      <section class="x-magnet-preview-dialog" role="dialog" aria-modal="true" aria-label="\u78c1\u529b\u9884\u89c8">
-        <button class="x-magnet-preview-close" type="button" aria-label="\u5173\u95ed">&times;</button>
-        <button class="x-magnet-preview-nav x-magnet-preview-prev" type="button" aria-label="\u4e0a\u4e00\u5f20">&lsaquo;</button>
+      <section class="x-magnet-preview-dialog" role="dialog" aria-modal="true" aria-label="磁力预览">
+        <button class="x-magnet-preview-close" type="button" aria-label="关闭">&times;</button>
+        <button class="x-magnet-preview-nav x-magnet-preview-prev" type="button" aria-label="上一张">&lsaquo;</button>
         <figure class="x-magnet-preview-stage">
           <img class="x-magnet-preview-image" alt="" />
           <figcaption class="x-magnet-preview-caption"></figcaption>
         </figure>
-        <button class="x-magnet-preview-nav x-magnet-preview-next" type="button" aria-label="\u4e0b\u4e00\u5f20">&rsaquo;</button>
-        <footer class="x-magnet-preview-footer"><a href="https://whatslink.info/" target="_blank" rel="noreferrer">\u9884\u89c8\u4fe1\u606f\u7531 whatslink.info \u63d0\u4f9b</a></footer>
+        <div class="x-magnet-preview-thumbs" aria-label="preview thumbnails"></div>
+        <button class="x-magnet-preview-nav x-magnet-preview-next" type="button" aria-label="下一张">&rsaquo;</button>
+        <footer class="x-magnet-preview-footer"><a href="https://whatslink.info/" target="_blank" rel="noreferrer">预览信息由 whatslink.info 提供</a></footer>
       </section>`;
 
     const image = modal.querySelector(".x-magnet-preview-image");
     const caption = modal.querySelector(".x-magnet-preview-caption");
     const prev = modal.querySelector(".x-magnet-preview-prev");
     const next = modal.querySelector(".x-magnet-preview-next");
+    const thumbs = modal.querySelector(".x-magnet-preview-thumbs");
     let wheelAt = 0;
 
     const close = () => {
@@ -75,8 +77,8 @@ Util.upStore();
     };
     const render = () => {
       image.src = screenshots[index];
-      image.alt = name || "\u78c1\u529b\u9884\u89c8";
-      caption.textContent = `${name || "\u78c1\u529b\u9884\u89c8"}${size ? ` \u00b7 ${size}` : ""}${count ? ` \u00b7 ${count} \u4e2a\u6587\u4ef6` : ""} \u00b7 ${index + 1} / ${screenshots.length}`;
+      image.alt = name || "磁力预览";
+      caption.textContent = `${name || "磁力预览"}${size ? ` · ${size}` : ""}${count ? ` · ${count} 个文件` : ""} · ${index + 1} / ${screenshots.length}`;
       prev.hidden = next.hidden = screenshots.length < 2;
       const adjacent = screenshots[(index + 1) % screenshots.length];
       if (adjacent) new Image().src = adjacent;
@@ -90,6 +92,22 @@ Util.upStore();
       if (event.key === "ArrowLeft") move(-1);
       if (event.key === "ArrowRight") move(1);
     };
+
+    screenshots.forEach((src, thumbIndex) => {
+      const thumb = document.createElement("button");
+      thumb.className = "x-magnet-preview-thumb";
+      thumb.type = "button";
+      thumb.setAttribute("aria-label", `preview ${thumbIndex + 1}`);
+      const thumbImage = new Image();
+      thumbImage.src = src;
+      thumbImage.alt = "";
+      thumb.append(thumbImage);
+      thumb.addEventListener("click", () => {
+        index = thumbIndex;
+        render();
+      });
+      thumbs.append(thumb);
+    });
 
     modal.querySelector(".x-magnet-preview-close").addEventListener("click", close);
     prev.addEventListener("click", () => move(-1));
@@ -119,10 +137,10 @@ Util.upStore();
     try {
       const data = await Req.request({ url: WHATS_LINK_API, params: { url }, responseType: "json" });
       const screenshots = getScreenshots(data);
-      if (!screenshots.length) throw new Error("\u6682\u65e0\u53ef\u7528\u9884\u89c8\u56fe");
+      if (!screenshots.length) throw new Error("暂无可用预览图");
       showPreview({ screenshots, name: data.name, size: data.size, count: data.count });
     } catch (err) {
-      Util.print(err?.message || "\u78c1\u529b\u9884\u89c8\u52a0\u8f7d\u5931\u8d25");
+      Util.print(err?.message || "磁力预览加载失败");
     } finally {
       button.classList.remove("is-loading");
       button.removeAttribute("disabled");
