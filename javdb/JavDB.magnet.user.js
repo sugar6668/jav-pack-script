@@ -39,112 +39,64 @@ Util.upStore();
   const CONT = document.querySelector("#magnets-content");
 
   const WHATS_LINK_API = "https://whatslink.info/api/v1/link";
+  const NEXT_ICON = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M11.2929 4.70711C10.9024 4.31658 10.9024 3.68342 11.2929 3.29289C11.6834 2.90237 12.3166 2.90237 12.7071 3.29289L20.7071 11.2929C21.0976 11.6834 21.0976 12.3166 20.7071 12.7071L12.7071 20.7071C12.3166 21.0976 11.6834 21.0976 11.2929 20.7071C10.9024 20.3166 10.9024 19.6834 11.2929 19.2929L18.5858 12L11.2929 4.70711Z" fill="currentColor"></path><path d="M3.29289 4.70711C2.90237 4.31658 2.90237 3.68342 3.29289 3.29289C3.68342 2.90237 4.31658 2.90237 4.70711 3.29289L12.7071 11.2929C13.0976 11.6834 13.0976 12.3166 12.7071 12.7071L4.70711 20.7071C4.31658 21.0976 3.68342 21.0976 3.29289 20.7071C2.90237 20.3166 2.90237 19.6834 3.29289 19.2929L10.5858 12L3.29289 4.70711Z" fill="currentColor"></path></svg>`;
 
-  const getScreenshots = (data) => {
-    const screenshots = Array.isArray(data?.screenshots) ? data.screenshots : [];
-    return screenshots
-      .map((item) => (typeof item === "string" ? item : item?.screenshot ?? item?.url ?? item?.src ?? item?.image))
-      .filter(Boolean);
-  };
+  const getScreenshots = (data) => (Array.isArray(data?.screenshots) ? data.screenshots : [])
+    .map((item) => (typeof item === "string" ? item : item?.screenshot ?? item?.url ?? item?.src ?? item?.image))
+    .filter(Boolean);
 
   const showPreview = ({ screenshots, name, size, count }) => {
     let index = 0;
     const modal = document.createElement("div");
     modal.className = "x-magnet-preview-modal";
-    modal.innerHTML = `
-      <section class="x-magnet-preview-dialog" role="dialog" aria-modal="true" aria-label="磁力预览">
-        <button class="x-magnet-preview-close" type="button" aria-label="关闭">&times;</button>
-        <button class="x-magnet-preview-nav x-magnet-preview-prev" type="button" aria-label="上一张">&lsaquo;</button>
-        <figure class="x-magnet-preview-stage">
-          <img class="x-magnet-preview-image" alt="" />
-          <figcaption class="x-magnet-preview-caption"></figcaption>
-        </figure>
-        <div class="x-magnet-preview-thumbs" aria-label="preview thumbnails"></div>
-        <button class="x-magnet-preview-nav x-magnet-preview-next" type="button" aria-label="下一张">&rsaquo;</button>
-        <footer class="x-magnet-preview-footer"><a href="https://whatslink.info/" target="_blank" rel="noreferrer">预览信息由 whatslink.info 提供</a></footer>
-      </section>`;
-
+    modal.innerHTML = `<section class="x-magnet-preview-dialog" role="dialog" aria-modal="true" aria-label="磁力预览">
+      <button class="x-magnet-preview-close" type="button" aria-label="关闭"></button>
+      <button class="x-magnet-preview-nav x-magnet-preview-prev" type="button" aria-label="上一张">${NEXT_ICON}</button>
+      <figure class="x-magnet-preview-stage"><img class="x-magnet-preview-image" alt="" /><figcaption class="x-magnet-preview-caption"></figcaption></figure>
+      <div class="x-magnet-preview-thumbs"></div>
+      <button class="x-magnet-preview-nav x-magnet-preview-next" type="button" aria-label="下一张">${NEXT_ICON}</button>
+      <footer class="x-magnet-preview-footer"><a href="https://whatslink.info/" target="_blank" rel="noreferrer">预览信息由 whatslink.info 提供</a></footer>
+    </section>`;
     const image = modal.querySelector(".x-magnet-preview-image");
     const caption = modal.querySelector(".x-magnet-preview-caption");
+    const thumbs = modal.querySelector(".x-magnet-preview-thumbs");
     const prev = modal.querySelector(".x-magnet-preview-prev");
     const next = modal.querySelector(".x-magnet-preview-next");
-    const thumbs = modal.querySelector(".x-magnet-preview-thumbs");
     let wheelAt = 0;
-
-    const close = () => {
-      document.removeEventListener("keydown", onKeydown);
-      modal.remove();
-    };
+    const close = () => { document.removeEventListener("keydown", onKeydown); modal.remove(); };
     const render = () => {
       image.src = screenshots[index];
       image.alt = name || "磁力预览";
       caption.textContent = `${name || "磁力预览"}${size ? ` · ${size}` : ""}${count ? ` · ${count} 个文件` : ""} · ${index + 1} / ${screenshots.length}`;
+      thumbs.querySelectorAll(".x-magnet-preview-thumb").forEach((thumb, i) => { thumb.classList.toggle("is-active", i === index); if (i === index) thumb.scrollIntoView({ block: "nearest", inline: "center" }); });
       prev.hidden = next.hidden = screenshots.length < 2;
-      const adjacent = screenshots[(index + 1) % screenshots.length];
-      if (adjacent) new Image().src = adjacent;
     };
-    const move = (step) => {
-      index = (index + step + screenshots.length) % screenshots.length;
-      render();
-    };
-    const onKeydown = (event) => {
-      if (event.key === "Escape") close();
-      if (event.key === "ArrowLeft") move(-1);
-      if (event.key === "ArrowRight") move(1);
-    };
-
-    screenshots.forEach((src, thumbIndex) => {
+    const move = (step) => { index = (index + step + screenshots.length) % screenshots.length; render(); };
+    const onKeydown = (event) => { if (event.key === "Escape") close(); if (event.key === "ArrowLeft") move(-1); if (event.key === "ArrowRight") move(1); };
+    screenshots.forEach((src, i) => {
       const thumb = document.createElement("button");
-      thumb.className = "x-magnet-preview-thumb";
-      thumb.type = "button";
-      thumb.setAttribute("aria-label", `preview ${thumbIndex + 1}`);
-      const thumbImage = new Image();
-      thumbImage.src = src;
-      thumbImage.alt = "";
-      thumb.append(thumbImage);
-      thumb.addEventListener("click", () => {
-        index = thumbIndex;
-        render();
-      });
-      thumbs.append(thumb);
+      thumb.className = "x-magnet-preview-thumb"; thumb.type = "button";
+      const thumbImage = new Image(); thumbImage.src = src; thumbImage.alt = "";
+      thumb.append(thumbImage); thumb.addEventListener("click", () => { index = i; render(); }); thumbs.append(thumb);
     });
-
     modal.querySelector(".x-magnet-preview-close").addEventListener("click", close);
-    prev.addEventListener("click", () => move(-1));
-    next.addEventListener("click", () => move(1));
-    modal.addEventListener("click", (event) => {
-      if (event.target === modal) close();
-    });
-    modal.addEventListener("wheel", (event) => {
-      if (screenshots.length < 2) return;
-      event.preventDefault();
-      const now = Date.now();
-      if (now - wheelAt < 180) return;
-      wheelAt = now;
-      move(event.deltaY > 0 ? 1 : -1);
-    }, { passive: false });
-    document.addEventListener("keydown", onKeydown);
-    document.body.append(modal);
-    render();
+    prev.addEventListener("click", () => move(-1)); next.addEventListener("click", () => move(1));
+    modal.addEventListener("click", (event) => { if (event.target === modal) close(); });
+    modal.addEventListener("wheel", (event) => { if (screenshots.length < 2) return; event.preventDefault(); const now = Date.now(); if (now - wheelAt < 180) return; wheelAt = now; move(event.deltaY > 0 ? 1 : -1); }, { passive: false });
+    document.addEventListener("keydown", onKeydown); document.body.append(modal); render();
   };
 
   const previewMagnet = async (button) => {
     const url = button.closest(".item")?.querySelector(".magnet-name a")?.href;
     if (!url) return;
-
-    button.classList.add("is-loading");
-    button.setAttribute("disabled", "");
+    button.classList.add("is-loading"); button.setAttribute("disabled", "");
     try {
       const data = await Req.request({ url: WHATS_LINK_API, params: { url }, responseType: "json" });
       const screenshots = getScreenshots(data);
       if (!screenshots.length) throw new Error("暂无可用预览图");
       showPreview({ screenshots, name: data.name, size: data.size, count: data.count });
-    } catch (err) {
-      Util.print(err?.message || "磁力预览加载失败");
-    } finally {
-      button.classList.remove("is-loading");
-      button.removeAttribute("disabled");
-    }
+    } catch (err) { Util.print(err?.message || "磁力预览加载失败"); }
+    finally { button.classList.remove("is-loading"); button.removeAttribute("disabled"); }
   };
 
   const getMagnets = () => {
@@ -179,7 +131,7 @@ Util.upStore();
         </a>
       </div>
       <div class="buttons column">
-        <button class="button is-small x-magnet-preview" type="button">\u78c1\u529b\u9884\u89c8</button>
+        <button class="button is-small x-magnet-preview" type="button">&#x78c1;&#x529b;&#x9884;&#x89c8;</button>
         <button class="button is-info is-small copy-to-clipboard" data-clipboard-text="${url}" type="button">
           复制
         </button>
