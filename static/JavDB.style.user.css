@@ -1885,3 +1885,120 @@ br + .title {
     display: none;
   }
 }
+
+
+.x-magnet-preview {
+  color: var(--x-cl);
+  background: color-mix(in srgb, var(--x-bg) 86%, var(--x-cl));
+  border-color: var(--x-bd);
+}
+
+.x-magnet-preview-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000000;
+  display: grid;
+  place-items: center;
+  padding: 1vh 1vw;
+  background: rgb(0 0 0 / 86%);
+}
+
+.x-magnet-preview-dialog {
+  position: relative;
+  display: grid;
+  grid-template: 1fr auto / auto minmax(0, 1fr) auto;
+  width: 98vw;
+  height: 98vh;
+  overflow: hidden;
+  background: #050505;
+  box-shadow: 0 1rem 4rem rgb(0 0 0 / 65%);
+}
+
+.x-magnet-preview-stage {
+  grid-column: 1 / -1;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  place-items: center;
+}
+
+.x-magnet-preview-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #050505;
+}
+
+.x-magnet-preview-caption,
+.x-magnet-preview-footer {
+  position: absolute;
+  z-index: 2;
+  color: #fff;
+  text-shadow: 0 1px 3px #000;
+}
+
+.x-magnet-preview-caption {
+  right: 4.5rem;
+  bottom: 0.7rem;
+  left: 4.5rem;
+  overflow: hidden;
+  font-size: 0.875rem;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.x-magnet-preview-footer {
+  bottom: 0.7rem;
+  left: 0.75rem;
+  font-size: 0.75rem;
+}
+
+.x-magnet-preview-footer a {
+  color: #d9d9d9;
+}
+
+.x-magnet-preview-close,
+.x-magnet-preview-nav {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  color: #fff;
+  cursor: pointer;
+  background: rgb(0 0 0 / 48%);
+  border: 1px solid rgb(255 255 255 / 28%);
+  place-items: center;
+}
+
+.x-magnet-preview-close {
+  top: 0.6rem;
+  right: 0.6rem;
+  font-size: 2rem;
+  line-height: 1;
+  border-radius: 50%;
+}
+
+.x-magnet-preview-nav {
+  top: 50%;
+  font-size: 2.75rem;
+  transform: translateY(-50%);
+}
+
+.x-magnet-preview-prev { left: 0.6rem; }
+.x-magnet-preview-next { right: 0.6rem; }
+
+.x-magnet-preview-close:hover,
+.x-magnet-preview-nav:hover {
+  background: rgb(30 30 30 / 88%);
+  border-color: #fff;
+}
+
+@media (max-width: 640px) {
+  .x-magnet-preview-modal { padding: 0; }
+  .x-magnet-preview-dialog { width: 100vw; height: 100vh; }
+  .x-magnet-preview-footer { display: none; }
+}

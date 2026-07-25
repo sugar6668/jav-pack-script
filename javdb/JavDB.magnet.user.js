@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.magnet
 // @namespace       JavDB.magnet@blc
-// @version         0.0.3
+// @version         0.0.5
 // @author          blc
 // @description     磁链扩展
 // @match           https://javdb.com/v/*
@@ -13,6 +13,7 @@
 // @connect         btdig.com
 // @connect         nyaa.si
 // @connect         u9a9.com
+// @connect         whatslink.info
 // @run-at          document-end
 // @grant           GM_xmlhttpRequest
 // @grant           GM_deleteValues
@@ -36,6 +37,97 @@ Util.upStore();
 
   const UNC = document.querySelector(".title.is-4").textContent.includes("無碼");
   const CONT = document.querySelector("#magnets-content");
+
+  const WHATS_LINK_API = "https://whatslink.info/api/v1/link";
+
+  const getScreenshots = (data) => {
+    const screenshots = Array.isArray(data?.screenshots) ? data.screenshots : [];
+    return screenshots
+      .map((item) => (typeof item === "string" ? item : item?.url ?? item?.src ?? item?.image))
+      .filter(Boolean);
+  };
+
+  const showPreview = ({ screenshots, name, size, count }) => {
+    let index = 0;
+    const modal = document.createElement("div");
+    modal.className = "x-magnet-preview-modal";
+    modal.innerHTML = `
+      <section class="x-magnet-preview-dialog" role="dialog" aria-modal="true" aria-label="\u78c1\u529b\u9884\u89c8">
+        <button class="x-magnet-preview-close" type="button" aria-label="\u5173\u95ed">&times;</button>
+        <button class="x-magnet-preview-nav x-magnet-preview-prev" type="button" aria-label="\u4e0a\u4e00\u5f20">&lsaquo;</button>
+        <figure class="x-magnet-preview-stage">
+          <img class="x-magnet-preview-image" alt="" />
+          <figcaption class="x-magnet-preview-caption"></figcaption>
+        </figure>
+        <button class="x-magnet-preview-nav x-magnet-preview-next" type="button" aria-label="\u4e0b\u4e00\u5f20">&rsaquo;</button>
+        <footer class="x-magnet-preview-footer"><a href="https://whatslink.info/" target="_blank" rel="noreferrer">\u9884\u89c8\u4fe1\u606f\u7531 whatslink.info \u63d0\u4f9b</a></footer>
+      </section>`;
+
+    const image = modal.querySelector(".x-magnet-preview-image");
+    const caption = modal.querySelector(".x-magnet-preview-caption");
+    const prev = modal.querySelector(".x-magnet-preview-prev");
+    const next = modal.querySelector(".x-magnet-preview-next");
+    let wheelAt = 0;
+
+    const close = () => {
+      document.removeEventListener("keydown", onKeydown);
+      modal.remove();
+    };
+    const render = () => {
+      image.src = screenshots[index];
+      image.alt = name || "\u78c1\u529b\u9884\u89c8";
+      caption.textContent = `${name || "\u78c1\u529b\u9884\u89c8"}${size ? ` \u00b7 ${size}` : ""}${count ? ` \u00b7 ${count} \u4e2a\u6587\u4ef6` : ""} \u00b7 ${index + 1} / ${screenshots.length}`;
+      prev.hidden = next.hidden = screenshots.length < 2;
+      const adjacent = screenshots[(index + 1) % screenshots.length];
+      if (adjacent) new Image().src = adjacent;
+    };
+    const move = (step) => {
+      index = (index + step + screenshots.length) % screenshots.length;
+      render();
+    };
+    const onKeydown = (event) => {
+      if (event.key === "Escape") close();
+      if (event.key === "ArrowLeft") move(-1);
+      if (event.key === "ArrowRight") move(1);
+    };
+
+    modal.querySelector(".x-magnet-preview-close").addEventListener("click", close);
+    prev.addEventListener("click", () => move(-1));
+    next.addEventListener("click", () => move(1));
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) close();
+    });
+    modal.addEventListener("wheel", (event) => {
+      if (screenshots.length < 2) return;
+      event.preventDefault();
+      const now = Date.now();
+      if (now - wheelAt < 180) return;
+      wheelAt = now;
+      move(event.deltaY > 0 ? 1 : -1);
+    }, { passive: false });
+    document.addEventListener("keydown", onKeydown);
+    document.body.append(modal);
+    render();
+  };
+
+  const previewMagnet = async (button) => {
+    const url = button.closest(".item")?.querySelector(".magnet-name a")?.href;
+    if (!url) return;
+
+    button.classList.add("is-loading");
+    button.setAttribute("disabled", "");
+    try {
+      const data = await Req.request({ url: WHATS_LINK_API, params: { url }, responseType: "json" });
+      const screenshots = getScreenshots(data);
+      if (!screenshots.length) throw new Error("\u6682\u65e0\u53ef\u7528\u9884\u89c8\u56fe");
+      showPreview({ screenshots, name: data.name, size: data.size, count: data.count });
+    } catch (err) {
+      Util.print(err?.message || "\u78c1\u529b\u9884\u89c8\u52a0\u8f7d\u5931\u8d25");
+    } finally {
+      button.classList.remove("is-loading");
+      button.removeAttribute("disabled");
+    }
+  };
 
   const getMagnets = () => {
     return [...CONT.querySelectorAll(".item.columns")]
@@ -69,6 +161,7 @@ Util.upStore();
         </a>
       </div>
       <div class="buttons column">
+        <button class="button is-small x-magnet-preview" type="button">\u78c1\u529b\u9884\u89c8</button>
         <button class="button is-info is-small copy-to-clipboard" data-clipboard-text="${url}" type="button">
           复制
         </button>
@@ -78,6 +171,13 @@ Util.upStore();
     </div>
     `;
   };
+
+  CONT.addEventListener("click", (event) => {
+    const button = event.target.closest(".x-magnet-preview");
+    if (!button) return;
+    event.preventDefault();
+    previewMagnet(button);
+  });
 
   const filterMin = (item) => !item.min;
 
