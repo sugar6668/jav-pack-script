@@ -82,6 +82,7 @@ const defaultConfig = [
     dir: `演员/\${actor}`,
     exclude: ["♂"],
     color: "is-danger",
+    inMagnets: true,
   },
 ];
 
