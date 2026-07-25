@@ -55,7 +55,6 @@ Util.upStore();
       <figure class="x-magnet-preview-stage"><img class="x-magnet-preview-image" alt="" /><figcaption class="x-magnet-preview-caption"></figcaption></figure>
       <div class="x-magnet-preview-thumbs"></div>
       <button class="x-magnet-preview-nav x-magnet-preview-next" type="button" aria-label="下一张">${NEXT_ICON}</button>
-      <footer class="x-magnet-preview-footer"><a href="https://whatslink.info/" target="_blank" rel="noreferrer">预览信息由 whatslink.info 提供</a></footer>
     </section>`;
     const image = modal.querySelector(".x-magnet-preview-image");
     const caption = modal.querySelector(".x-magnet-preview-caption");
@@ -82,6 +81,9 @@ Util.upStore();
     modal.querySelector(".x-magnet-preview-close").addEventListener("click", close);
     prev.addEventListener("click", () => move(-1)); next.addEventListener("click", () => move(1));
     modal.addEventListener("click", (event) => { if (event.target === modal) close(); });
+    modal.querySelector(".x-magnet-preview-stage").addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) close();
+    });
     modal.addEventListener("wheel", (event) => { if (screenshots.length < 2) return; event.preventDefault(); const now = Date.now(); if (now - wheelAt < 180) return; wheelAt = now; move(event.deltaY > 0 ? 1 : -1); }, { passive: false });
     document.addEventListener("keydown", onKeydown); document.body.append(modal); render();
   };
