@@ -389,8 +389,9 @@ window.JavPackSubtitle = class JavPackSubtitle {
         this.getGrant()?.notify?.({ icon: "success", msg: "字幕已上传到 115" });
         document.getElementById(this.BTN_ID)?.classList.add("is-success");
         document.getElementById(this.BTN_ID).textContent = "已有字幕";
-        // Update the matcher immediately.  In Quick View the detail script
-        // forwards this state to the source card before the iframe closes.
+        // Notify JavDB.match115 immediately.  In QuickView this event is
+        // forwarded to the source card, so the subtitle SVG does not depend on
+        // iframe unload timing or a delayed 115 search.
         window.dispatchEvent(new CustomEvent("JavDB_SubtitleUploaded", {
           detail: { code: details.code || "", cid: String(cid) },
         }));
