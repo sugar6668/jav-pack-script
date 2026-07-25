@@ -220,6 +220,19 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       await this.uploadCover({ req115, cid: targetCid, details }).catch((err) => console.warn("[JavPackMatch115Console.handleCover]", err?.message));
     }
 
+    // Only remove the original directory after every selected file has been
+    // moved and the destination work has completed.  A matched item may come
+    // from a collection folder, so delete it only when the 115 listing
+    // explicitly reports that no entries remain.
+    if (String(file.cid) !== String(targetCid)) {
+      const sourceRes = await req115.files(file.cid, { limit: 1 });
+      const sourceCount = Number(sourceRes?.count);
+      if (Number.isFinite(sourceCount) && sourceCount === 0) {
+        const deleteRes = await req115.rbDelete([file.cid]);
+        if (!deleteRes || deleteRes.state === false) throw new Error("源文件夹清理失败");
+      }
+    }
+
     return targetCid;
   }
 
@@ -325,8 +338,10 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         } else if (action === "delv" || action === "delf") {
           await this.deleteMatched({ req115, item, action });
           const cache = options.removeFromCache?.(item, action);
-          // Detail views can be inside Quick View.  Pass the exact post-delete
-          // state to the source card rather than relying on a delayed search.
+          // Detail views run in the quick-view iframe.  Send the exact
+          // post-delete cache snapshot back to the source card instead of
+          // waiting for a new 115 search (which can briefly return deleted
+          // files while indexing catches up).
           options.syncCache?.(cache);
           if (action === "delf") {
             // 删除文件夹会同时删除该目录下的所有匹配项；同步移除整组行，避免只消失当前行而显示旧结果。
