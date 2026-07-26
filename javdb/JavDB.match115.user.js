@@ -177,7 +177,25 @@ const formatDirectory = (item) => {
   return item.t || item.pc || "";
 };
 
-const formatTip = (item) => `${item.n} - ${item.s} / ${formatDirectory(item)}`;
+const truncateHoverText = (value = "", max = 96) => {
+  const text = String(value || "");
+  if (text.length <= max) return text;
+  const head = Math.ceil((max - 1) / 2);
+  const tail = Math.floor((max - 1) / 2);
+  return `${text.slice(0, head)}…${text.slice(-tail)}`;
+};
+
+const formatHoverLine = (label, value = "", max = 96) => {
+  if (window.JavPackMatch115Console?.formatHoverLine) return window.JavPackMatch115Console.formatHoverLine(label, value, max);
+  const text = String(value || "");
+  return `${label}(${text.length})：${truncateHoverText(text, max)}`;
+};
+
+const formatTip = (item) => [
+  formatHoverLine("视频", item.n),
+  item.s && `大小：${item.s}`,
+  formatHoverLine("目录", formatDirectory(item)),
+].filter(Boolean).join("\n");
 
 const enrichMetadata = async (sources) => {
   if (!window.JavPackMatch115Console?.enrichMetadata) return sources;

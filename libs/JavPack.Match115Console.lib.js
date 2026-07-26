@@ -28,6 +28,33 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     return { ...item, ico: item.ico || this.getExt(item.n) };
   }
 
+  static truncateHoverText(value = "", max = 96) {
+    const text = String(value || "");
+    if (text.length <= max) return text;
+    const head = Math.ceil((max - 1) / 2);
+    const tail = Math.floor((max - 1) / 2);
+    return `${text.slice(0, head)}…${text.slice(-tail)}`;
+  }
+
+  static formatHoverLine(label, value = "", max = 96) {
+    const text = String(value || "");
+    return `${label}(${text.length})：${this.truncateHoverText(text, max)}`;
+  }
+
+  static formatItemTip(file = {}, path = this.formatDirectory(file)) {
+    return [
+      this.formatHoverLine("视频", file.n || file.name || file.file_name || ""),
+      file.s && `大小：${file.s}`,
+      this.formatHoverLine("目录", path || ""),
+    ].filter(Boolean).join("\n");
+  }
+
+  static replaceDirectoryTail(path = "", folderName = "") {
+    const text = String(path || "").trim();
+    if (!text || text === "目录未知") return folderName;
+    return text.includes("/") ? text.replace(/[^/]+$/, folderName) : folderName;
+  }
+
   static formatDirectory(item = {}) {
     if (item.realPath) return String(item.realPath);
 
@@ -136,8 +163,8 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     const normalized = this.normalizeFile(file);
     const rename = this.buildRename(details, [normalized]);
     const lines = [];
-    if (mode !== "rename") lines.push(`目录：${this.buildArchiveDir(details, mode).join("/")}`);
-    lines.push(`主文件：${rename}.${normalized.ico}`);
+    if (mode !== "rename") lines.push(this.formatHoverLine("目录", this.buildArchiveDir(details, mode).join("/")));
+    lines.push(this.formatHoverLine("视频", `${rename}.${normalized.ico}`));
     if (mode !== "rename") lines.push("同目录字幕会一并移动并按相同规则命名");
     return lines.join("\n");
   }
@@ -145,7 +172,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
   static renderItem(item, details = {}) {
     const file = this.normalizeFile(item);
     const path = this.formatDirectory(file);
-    const tip = [file.n, file.s, path].filter(Boolean).join("\n");
+    const tip = this.formatItemTip(file, path);
     const safeName = this.escapeHtml(file.n);
     const safePath = this.escapeHtml(path);
     const safeTip = this.escapeHtml(tip);
@@ -247,12 +274,19 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
 
   static async renameMatched({ req115, item, details }) {
     const file = this.normalizeFile(item);
-    return req115.handleRename([file], file.cid, {
-      rename: this.buildRename(details, [file]),
+    const { data: srts = [] } = await req115.filesAllSRTs(file.cid).catch(() => ({ data: [] }));
+    const subtitles = srts.filter((srt) => this.belongsToVideoSubtitle(file, srt));
+    const files = [file, ...subtitles.map((srt) => this.normalizeFile(srt))];
+    const rename = this.buildRename(details, [file]);
+
+    await req115.handleRename(files, file.cid, {
+      rename,
       renameTxt: { zh: " [中文]", crack: "", no: ".${no}", sep: "-" },
       zh: false,
       crack: false,
     });
+
+    return { file, rename };
   }
 
   static async deleteMatched({ req115, item, action }) {
@@ -326,9 +360,19 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           options.invalidateCache?.();
           await options.refresh?.().catch((err) => console.warn("[JavPackMatch115Console.refresh]", err?.message));
         } else if (action === "rename") {
-          await this.renameMatched({ req115, item, details });
-          const nameNode = btn.closest(".zymatch-item")?.querySelector(".x-match-name");
-          if (nameNode) nameNode.textContent = this.buildRename(details, [item]);
+          const { file, rename } = await this.renameMatched({ req115, item, details });
+          const itemDom = btn.closest(".zymatch-item");
+          const renamedVideo = `${rename}.${file.ico}`;
+          const nameNode = itemDom?.querySelector(".x-match-name");
+          if (nameNode) nameNode.textContent = renamedVideo;
+          const dirNode = itemDom?.querySelector(".x-match-dir");
+          if (dirNode) dirNode.textContent = this.replaceDirectoryTail(dirNode.textContent, rename);
+          itemDom?.querySelectorAll("[data-n]").forEach((node) => {
+            node.dataset.n = renamedVideo;
+          });
+          const matchNode = itemDom?.querySelector(".x-match");
+          if (matchNode) matchNode.title = this.formatItemTip({ ...file, n: renamedVideo }, dirNode?.textContent);
+          options.invalidateCache?.();
         } else if (action === "cover") {
           await this.uploadCover({ req115, cid: item.cid, details });
           btn.classList.remove("is-info");
