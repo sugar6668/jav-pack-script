@@ -325,16 +325,14 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       };
       const action = btn.dataset.action;
       const oldText = btn.textContent;
-      const actionToken = crypto.randomUUID();
+      const restoreText = action === "rename" ? "重命名" : oldText;
       const useSpinner = action === "archive";
-      let handledButtonState = false;
 
       const dropdown = btn.closest(".x-match-archive-dropdown");
       dropdown?.classList.remove("is-active");
       dropdown?.querySelector(".x-match-archive-toggle")?.setAttribute("aria-expanded", "false");
 
       btn.dataset.busy = "1";
-      btn.dataset.actionToken = actionToken;
       if (useSpinner) {
         btn.classList.add("is-loading");
       } else {
@@ -376,14 +374,11 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           const matchNode = itemDom?.querySelector(".x-match");
           if (matchNode) matchNode.title = this.formatItemTip({ ...file, n: renamedVideo }, dirNode?.textContent);
           options.invalidateCache?.();
-          handledButtonState = true;
           grant?.notify?.({ status: "success", icon: "success", msg: "操作成功" });
           btn.style.opacity = "1";
           delete btn.dataset.busy;
-          btn.textContent = "已重命名";
-          setTimeout(() => {
-            if (btn.dataset.actionToken === actionToken && btn.dataset.busy !== "1") btn.textContent = oldText;
-          }, 800);
+          btn.textContent = restoreText;
+          return;
         } else if (action === "cover") {
           await this.uploadCover({ req115, cid: item.cid, details });
           btn.classList.remove("is-info");
@@ -408,26 +403,22 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           }
         }
 
-        if (!handledButtonState) grant?.notify?.({ status: "success", icon: "success", msg: "操作成功" });
+        grant?.notify?.({ status: "success", icon: "success", msg: "操作成功" });
         if (action === "archive") {
           btn.textContent = "已归档";
           btn.setAttribute("disabled", "");
-        } else if (action === "rename" && !handledButtonState) {
-          btn.textContent = "已重命名";
-          setTimeout(() => {
-            if (btn.dataset.actionToken === actionToken && btn.dataset.busy !== "1") btn.textContent = oldText;
-          }, 800);
         } else if (action === "delv" || action === "delf") {
           btn.textContent = "已删除";
           btn.setAttribute("disabled", "");
         }
       } catch (err) {
         grant?.notify?.({ status: "error", icon: "error", msg: err?.message || "操作失败" });
-        btn.textContent = oldText;
+        btn.textContent = restoreText;
       } finally {
         if (useSpinner) btn.classList.remove("is-loading");
         btn.style.opacity = "1";
         delete btn.dataset.busy;
+        if (action === "rename" && btn.textContent === "执行中..") btn.textContent = restoreText;
       }
     }, true);
   }
