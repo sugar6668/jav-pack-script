@@ -335,6 +335,11 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       btn.dataset.busy = "1";
       if (useSpinner) {
         btn.classList.add("is-loading");
+      } else if (action === "rename") {
+        // Rename updates the row in-place.  Keep its label stable so a later
+        // render or a detached old button can never leave the visible control
+        // showing a stale progress label.
+        btn.style.opacity = "0.5";
       } else {
         btn.textContent = "执行中..";
         btn.style.opacity = "0.5";
@@ -375,9 +380,6 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           if (matchNode) matchNode.title = this.formatItemTip({ ...file, n: renamedVideo }, dirNode?.textContent);
           options.invalidateCache?.();
           grant?.notify?.({ status: "success", icon: "success", msg: "操作成功" });
-          btn.style.opacity = "1";
-          delete btn.dataset.busy;
-          btn.textContent = restoreText;
           return;
         } else if (action === "cover") {
           await this.uploadCover({ req115, cid: item.cid, details });
@@ -418,7 +420,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         if (useSpinner) btn.classList.remove("is-loading");
         btn.style.opacity = "1";
         delete btn.dataset.busy;
-        if (action === "rename" && btn.textContent === "执行中..") btn.textContent = restoreText;
+        if (action === "rename") btn.textContent = restoreText;
       }
     }, true);
   }
