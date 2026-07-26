@@ -61,8 +61,18 @@ Util.upStore();
     const thumbs = modal.querySelector(".x-magnet-preview-thumbs");
     const prev = modal.querySelector(".x-magnet-preview-prev");
     const next = modal.querySelector(".x-magnet-preview-next");
+    const closeButton = modal.querySelector(".x-magnet-preview-close");
+    const stage = modal.querySelector(".x-magnet-preview-stage");
     let wheelAt = 0;
     const close = () => { document.removeEventListener("keydown", onKeydown); modal.remove(); };
+    const positionCloseButton = () => {
+      if (!image.naturalWidth || !image.naturalHeight) return;
+      const scale = Math.min(stage.clientWidth / image.naturalWidth, stage.clientHeight / image.naturalHeight);
+      const width = image.naturalWidth * scale;
+      const height = image.naturalHeight * scale;
+      closeButton.style.left = `${stage.offsetLeft + (stage.clientWidth - width) / 2 + width - closeButton.offsetWidth - 10}px`;
+      closeButton.style.top = `${stage.offsetTop + (stage.clientHeight - height) / 2 + 10}px`;
+    };
     const render = () => {
       image.src = screenshots[index];
       image.alt = name || "磁力预览";
@@ -78,10 +88,11 @@ Util.upStore();
       const thumbImage = new Image(); thumbImage.src = src; thumbImage.alt = "";
       thumb.append(thumbImage); thumb.addEventListener("click", () => { index = i; render(); }); thumbs.append(thumb);
     });
-    modal.querySelector(".x-magnet-preview-close").addEventListener("click", close);
+    image.addEventListener("load", positionCloseButton);
+    closeButton.addEventListener("click", close);
     prev.addEventListener("click", () => move(-1)); next.addEventListener("click", () => move(1));
     modal.addEventListener("click", (event) => { if (event.target === modal) close(); });
-    modal.querySelector(".x-magnet-preview-stage").addEventListener("click", (event) => {
+    stage.addEventListener("click", (event) => {
       if (event.target === event.currentTarget) close();
     });
     modal.addEventListener("wheel", (event) => { if (screenshots.length < 2) return; event.preventDefault(); const now = Date.now(); if (now - wheelAt < 180) return; wheelAt = now; move(event.deltaY > 0 ? 1 : -1); }, { passive: false });

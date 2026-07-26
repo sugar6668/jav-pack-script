@@ -1905,7 +1905,7 @@ br + .title {
 }
 .x-magnet-preview-caption { bottom: 6.4rem; left: 50%; max-width: calc(100% - 9rem); padding: .3rem .7rem; overflow: hidden; font-size: .875rem; text-align: center; text-overflow: ellipsis; white-space: nowrap; background: rgb(20 20 24 / 78%); border-radius: 999px; transform: translateX(-50%); }
 .x-magnet-preview-close, .x-magnet-preview-nav { position: absolute; z-index: 3; display: grid; width: 2.75rem; height: 2.75rem; padding: 0; color: #fff; cursor: pointer; background: rgb(20 20 24 / 72%); border: 1px solid rgb(255 255 255 / 28%); place-items: center; }
-.x-magnet-preview-close { top: .6rem; right: .6rem; border-radius: 50%; }
+.x-magnet-preview-close { top: .6rem; right: auto; border-radius: 50%; }
 .x-magnet-preview-nav { top: 50%; transform: translateY(-50%); }
 .x-magnet-preview-prev { left: .6rem; transform: translateY(-50%) scaleX(-1); }
 .x-magnet-preview-next { right: .6rem; }
