@@ -327,6 +327,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       const oldText = btn.textContent;
       const actionToken = crypto.randomUUID();
       const useSpinner = action === "archive";
+      let handledButtonState = false;
 
       const dropdown = btn.closest(".x-match-archive-dropdown");
       dropdown?.classList.remove("is-active");
@@ -375,6 +376,14 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           const matchNode = itemDom?.querySelector(".x-match");
           if (matchNode) matchNode.title = this.formatItemTip({ ...file, n: renamedVideo }, dirNode?.textContent);
           options.invalidateCache?.();
+          handledButtonState = true;
+          grant?.notify?.({ status: "success", icon: "success", msg: "操作成功" });
+          btn.style.opacity = "1";
+          delete btn.dataset.busy;
+          btn.textContent = "已重命名";
+          setTimeout(() => {
+            if (btn.dataset.actionToken === actionToken && btn.dataset.busy !== "1") btn.textContent = oldText;
+          }, 800);
         } else if (action === "cover") {
           await this.uploadCover({ req115, cid: item.cid, details });
           btn.classList.remove("is-info");
@@ -399,11 +408,11 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           }
         }
 
-        grant?.notify?.({ status: "success", icon: "success", msg: "操作成功" });
+        if (!handledButtonState) grant?.notify?.({ status: "success", icon: "success", msg: "操作成功" });
         if (action === "archive") {
           btn.textContent = "已归档";
           btn.setAttribute("disabled", "");
-        } else if (action === "rename") {
+        } else if (action === "rename" && !handledButtonState) {
           btn.textContent = "已重命名";
           setTimeout(() => {
             if (btn.dataset.actionToken === actionToken && btn.dataset.busy !== "1") btn.textContent = oldText;
