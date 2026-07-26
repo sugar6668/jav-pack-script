@@ -38,7 +38,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
 
   static formatHoverLine(label, value = "", max = 96) {
     const text = String(value || "");
-    return `${label}(${text.length})：${this.truncateHoverText(text, max)}`;
+    return `${label}：${this.truncateHoverText(text, max)}`;
   }
 
   static formatItemTip(file = {}, path = this.formatDirectory(file)) {
@@ -325,6 +325,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       };
       const action = btn.dataset.action;
       const oldText = btn.textContent;
+      const actionToken = crypto.randomUUID();
       const useSpinner = action === "archive";
 
       const dropdown = btn.closest(".x-match-archive-dropdown");
@@ -332,6 +333,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       dropdown?.querySelector(".x-match-archive-toggle")?.setAttribute("aria-expanded", "false");
 
       btn.dataset.busy = "1";
+      btn.dataset.actionToken = actionToken;
       if (useSpinner) {
         btn.classList.add("is-loading");
       } else {
@@ -398,8 +400,18 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         }
 
         grant?.notify?.({ status: "success", icon: "success", msg: "操作成功" });
-        if (action !== "cover") btn.textContent = action === "archive" ? "已归档" : action === "rename" ? "已重命名" : "已删除";
-        btn.setAttribute("disabled", "");
+        if (action === "archive") {
+          btn.textContent = "已归档";
+          btn.setAttribute("disabled", "");
+        } else if (action === "rename") {
+          btn.textContent = "已重命名";
+          setTimeout(() => {
+            if (btn.dataset.actionToken === actionToken && btn.dataset.busy !== "1") btn.textContent = oldText;
+          }, 800);
+        } else if (action === "delv" || action === "delf") {
+          btn.textContent = "已删除";
+          btn.setAttribute("disabled", "");
+        }
       } catch (err) {
         grant?.notify?.({ status: "error", icon: "error", msg: err?.message || "操作失败" });
         btn.textContent = oldText;

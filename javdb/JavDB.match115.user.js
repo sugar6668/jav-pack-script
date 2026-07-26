@@ -188,7 +188,7 @@ const truncateHoverText = (value = "", max = 96) => {
 const formatHoverLine = (label, value = "", max = 96) => {
   if (window.JavPackMatch115Console?.formatHoverLine) return window.JavPackMatch115Console.formatHoverLine(label, value, max);
   const text = String(value || "");
-  return `${label}(${text.length})：${truncateHoverText(text, max)}`;
+  return `${label}：${truncateHoverText(text, max)}`;
 };
 
 const formatTip = (item) => [
