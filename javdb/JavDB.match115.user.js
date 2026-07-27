@@ -209,8 +209,9 @@ const getPageDetails = (dom = document) => {
 
   const titleNode = dom.querySelector(".title.is-4");
   const label = titleNode?.querySelector("strong")?.textContent.trim() || "";
-  const currentTitle = titleNode?.querySelector(".origin-title, .current-title")?.textContent.trim() || "";
-  const title = `${label}${currentTitle}`.replace(code, "").trim();
+  const originTitle = titleNode?.querySelector(".origin-title")?.textContent.trim();
+  const currentTitle = titleNode?.querySelector(".current-title")?.textContent.trim();
+  const title = `${label}${originTitle || currentTitle || ""}`.replace(code, "").trim();
   // 详情页的演员链接位于 movie-panel-info 内；按页面展示顺序取首位演员作为默认归档目录。
   const actors = [...dom.querySelectorAll('.movie-panel-info a[href*="/actors/"]')]
     .map((node) => node.textContent.trim())
