@@ -1573,6 +1573,20 @@ br + .title {
 
 .pdb-sub-tr {
   border-bottom: 1px dashed #f0f0f0;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.pdb-sub-tr.is-previewing {
+  background: #e9f8f6;
+  box-shadow: inset 4px 0 0 #19c5b7;
+}
+
+.pdb-sub-tr.is-previewing .pdb-sub-td,
+.pdb-sub-tr.is-previewing .pdb-sub-td-provider,
+.pdb-sub-tr.is-previewing .pdb-sub-td-lang,
+.pdb-sub-tr.is-previewing .pdb-sub-td-ext,
+.pdb-sub-tr.is-previewing .pdb-sub-td-actions {
+  background: transparent;
 }
 
 .pdb-sub-td {

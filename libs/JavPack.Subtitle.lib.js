@@ -378,6 +378,7 @@ window.JavPackSubtitle = class JavPackSubtitle {
       if (action === "preview") {
         previewBox.value = text;
         statusNode.textContent = filename;
+        this.setActivePreviewRow(overlay, btn);
       } else if (action === "download") {
         this.downloadBuffer(buffer, filename);
       } else if (action === "upload") {
@@ -404,6 +405,17 @@ window.JavPackSubtitle = class JavPackSubtitle {
       btn.textContent = oldText;
       btn.style.opacity = "1";
     }
+  }
+
+  static setActivePreviewRow(overlay, btn) {
+    overlay.querySelectorAll(".pdb-sub-tr.is-previewing").forEach((row) => {
+      row.classList.remove("is-previewing");
+      row.removeAttribute("aria-current");
+    });
+    const row = btn.closest(".pdb-sub-tr");
+    if (!row) return;
+    row.classList.add("is-previewing");
+    row.setAttribute("aria-current", "true");
   }
 
   static decodeSubtitle(buffer) {
