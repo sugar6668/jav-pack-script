@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.6
+// @version         0.0.7
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -38,16 +38,42 @@ const CHANNEL = new BroadcastChannel(GM_info.script.name);
 const MATCH_API = "reMatch";
 
 const MatchCache = (() => {
-  const PREFIX = "jdb_match_v1_";
-  const TTL_HIT = 30 * 24 * 60 * 60 * 1000;
-  const TTL_EMPTY = 30 * 60 * 1000;
+  const PREFIX = "jdb_match_state_v2_";
+  const LEGACY_PREFIX = "jdb_match_v1_";
+  const MIGRATION_KEY = "jdb_match_state_v2_migrated";
   const mem = new Map();
 
   const normalize = (key) => String(key || "").trim().toUpperCase();
   const fullKey = (key) => PREFIX + normalize(key);
-  const ttl = (data) => (data.length ? TTL_HIT : TTL_EMPTY);
-  const valid = (value) => value && typeof value.ts === "number" && Array.isArray(value.data);
-  const expired = ({ ts, data }) => Date.now() - ts > ttl(data);
+  const valid = (value) => value
+    && (value.status === "matched" || value.status === "unmatched")
+    && Array.isArray(value.data)
+    && typeof value.revision === "number";
+
+  const makeRecord = (data, previous = null, updatedAt = Date.now()) => ({
+    status: data.length ? "matched" : "unmatched",
+    data,
+    revision: (previous?.revision || 0) + 1,
+    updatedAt,
+  });
+
+  const migrate = () => {
+    if (GM_getValue(MIGRATION_KEY)) return;
+
+    GM_listValues().forEach((key) => {
+      if (!key.startsWith(LEGACY_PREFIX)) return;
+
+      const legacy = GM_getValue(key);
+      if (!legacy || !Array.isArray(legacy.data)) return;
+
+      const cacheKey = normalize(key.slice(LEGACY_PREFIX.length));
+      if (!cacheKey || valid(GM_getValue(fullKey(cacheKey)))) return;
+
+      GM_setValue(fullKey(cacheKey), makeRecord(legacy.data, null, legacy.ts || Date.now()));
+    });
+
+    GM_setValue(MIGRATION_KEY, true);
+  };
 
   const del = (key) => {
     const cacheKey = normalize(key);
@@ -67,34 +93,19 @@ const MatchCache = (() => {
     }
 
     if (!valid(value)) return null;
-    if (expired(value)) {
-      del(cacheKey);
-      return null;
-    }
-
     return value.data;
   };
 
   const set = (key, data) => {
     const cacheKey = normalize(key);
     if (!cacheKey || !Array.isArray(data)) return;
-    const value = { ts: Date.now(), data };
+    const value = makeRecord(data, mem.get(cacheKey) || GM_getValue(fullKey(cacheKey)));
     mem.set(cacheKey, value);
     GM_setValue(fullKey(cacheKey), value);
   };
 
-  const sweep = () => {
-    setTimeout(() => {
-      GM_listValues().forEach((key) => {
-        if (!key.startsWith(PREFIX)) return;
-        const value = GM_getValue(key);
-        if (!valid(value) || expired(value)) GM_deleteValue(key);
-      });
-    }, 10 * 1000);
-  };
-
-  sweep();
-  return { get, set, del, sweep };
+  migrate();
+  return { get, set, del };
 })();
 
 
@@ -132,6 +143,7 @@ const listenClick = (onclose, defaultAction) => {
 
     e.preventDefault();
     e.stopPropagation();
+    e.stopImmediatePropagation();
 
     const action = actions[type];
     if (!action) return;

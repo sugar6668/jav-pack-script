@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.filter
 // @namespace       JavDB.filter@blc
-// @version         0.0.14
+// @version         0.0.15
 // @author          blc
 // @description     评分筛选与性癖净化
 // @match           https://javdb.com/*
@@ -344,6 +344,7 @@
   }
   window.addEventListener("scroll", loadMoreActorWorksAtPageEnd, { passive: true });
   document.addEventListener("contextmenu", (event) => {
+    if (event.target.closest(".x-match")) return;
     const item = event.target.closest(".movie-list .item");
     if (!item) return;
     event.preventDefault();

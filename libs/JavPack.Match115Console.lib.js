@@ -379,6 +379,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           const matchNode = itemDom?.querySelector(".x-match");
           if (matchNode) matchNode.title = this.formatItemTip({ ...file, n: renamedVideo }, dirNode?.textContent);
           options.invalidateCache?.();
+          await options.refresh?.().catch((err) => console.warn("[JavPackMatch115Console.refresh]", err?.message));
           grant?.notify?.({ status: "success", icon: "success", msg: "操作成功" });
           return;
         } else if (action === "cover") {
