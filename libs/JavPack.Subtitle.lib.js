@@ -103,6 +103,9 @@ window.JavPackSubtitle = class JavPackSubtitle {
           ...[...files].map((name) => `  - ${name}`),
         ])].join("\n")
         : "暂无已匹配的字幕文件";
+      btn.textContent = groups.size ? "已有字幕" : "字幕搜索";
+      btn.classList.toggle("is-success", Boolean(groups.size));
+      btn.classList.toggle("is-info", !groups.size);
     };
     btn.addEventListener("mouseenter", refreshSubtitleFileTip);
     btn.addEventListener("focus", refreshSubtitleFileTip);
@@ -112,17 +115,15 @@ window.JavPackSubtitle = class JavPackSubtitle {
       this.openSearchModal({ details, getTargetCid });
     });
     buttons.appendChild(btn);
+    refreshSubtitleFileTip();
 
-    const req115 = this.getReq115();
-    const cid = getTargetCid?.() || this.getTargetCid();
-    if (req115 && cid) {
-      this.checkSubInCloud(req115, cid).then((hasSub) => {
-        if (!hasSub) return;
-        btn.textContent = "已有字幕";
-        btn.classList.remove("is-info");
-        btn.classList.add("is-success");
-      }).catch(() => {});
-    }
+    const matchRoot = document.querySelector(".x-match-cont");
+    if (matchRoot) new MutationObserver(refreshSubtitleFileTip).observe(matchRoot, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-has-subtitle", "data-subtitle-files"],
+    });
   }
 
   static modalTemplate(defaultKw) {
