@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.7
+// @version         0.0.9
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -209,9 +209,9 @@ const formatTip = (item) => [
   formatHoverLine("目录", formatDirectory(item)),
 ].filter(Boolean).join("\n");
 
-const enrichMetadata = async (sources) => {
+const enrichMetadata = async (sources, details = {}) => {
   if (!window.JavPackMatch115Console?.enrichMetadata) return sources;
-  return window.JavPackMatch115Console.enrichMetadata(sources, Req115);
+  return window.JavPackMatch115Console.enrichMetadata(sources, Req115, details);
 };
 
 const getPageDetails = (dom = document) => {
@@ -268,7 +268,7 @@ const getPageDetails = (dom = document) => {
       const { data = [] } = await Req115.filesSearchAllVideos(codes.join(" "));
       if (load.dataset.uid !== UUID) return;
 
-      const sources = await enrichMetadata(extractData(data.filter((it) => regex.test(it.n))));
+      const sources = await enrichMetadata(extractData(data.filter((it) => regex.test(it.n))), { code, codes, regex });
       cont.innerHTML = sources.map((item) => render(item, codeDetails)).join("") || "暂无匹配";
       MatchCache.set(code, sources);
     } catch (err) {
@@ -486,12 +486,13 @@ const getPageDetails = (dom = document) => {
     const queue = [];
     let loading = false;
 
-    const over = (key, data = [], shouldCache = false) => {
-      wait[key].forEach((it) => {
+    const over = async (key, data = [], shouldCache = false) => {
+      await Promise.all(wait[key].map(async (it) => {
         const scoped = data.filter((file) => it.regex.test(file.n));
-        if (shouldCache) MatchCache.set(it.code, scoped);
-        after?.(it, scoped);
-      });
+        const enriched = await enrichMetadata(scoped, it);
+        if (shouldCache) MatchCache.set(it.code, enriched);
+        after?.(it, enriched);
+      }));
       delete wait[key];
     };
 
@@ -504,10 +505,10 @@ const getPageDetails = (dom = document) => {
         const { data = [] } = await Req115.filesSearchAllVideos(searchKey);
         const pendingItems = wait[searchKey] || [];
         const matchedData = data.filter((item) => pendingItems.some(({ regex }) => regex.test(item.n)));
-        const sources = await enrichMetadata(extractData(matchedData));
-        over(searchKey, sources, true);
+        const sources = extractData(matchedData);
+        await over(searchKey, sources, true);
       } catch (err) {
-        over(searchKey);
+        await over(searchKey);
         Util.print(err?.message);
       }
 
@@ -530,7 +531,7 @@ const getPageDetails = (dom = document) => {
       const { code, prefix, searchKey } = details;
       const cache = MatchCache.get(code) ?? MatchCache.get(prefix);
       if (cache !== null) {
-        return enrichMetadata(cache)
+        return enrichMetadata(cache, details)
           .then((sources) => {
             MatchCache.set(code, sources);
             after?.(details, sources);
@@ -622,7 +623,8 @@ const getPageDetails = (dom = document) => {
     const target = movie.querySelector(`.${TARGET_CLASS}`);
     if (!code || !target) return;
 
-    const { codes, regex } = Util.codeParse(code);
+    const details = Util.codeParse(code);
+    const { codes, regex } = details;
     const UUID = crypto.randomUUID();
     target.dataset.uid = UUID;
 
@@ -630,7 +632,7 @@ const getPageDetails = (dom = document) => {
       const { data = [] } = await Req115.filesSearchAllVideos(codes.join(" "));
       if (target.dataset.uid !== UUID) return;
 
-      const sources = await enrichMetadata(extractData(data.filter((it) => regex.test(it.n))));
+      const sources = await enrichMetadata(extractData(data.filter((it) => regex.test(it.n))), details);
       MatchCache.set(code, sources);
     } catch (err) {
       if (target.dataset.uid !== UUID) return;

@@ -5,6 +5,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
   static zhReg = /中文|中字|字幕|\[[a-z]?hdc[a-z]?\]|[-_\s]+(uc|c|ch|cu|zh)(?![a-z])/i;
 
   static subtitleFileReg = /\.(srt|ass|ssa|vtt|sub)$/i;
+  static subtitleDetectionVersion = 2;
   static archiveAttachmentFileReg = /\.(srt|ass|ssa|vtt|sub|nfo)$/i;
   static crackReg = /无码破解|無碼破解|流出|破解|解密版|uncensored|restored|破[\u4E00-\u9FC6]版|[-_\s]+(cu|u|uc)(?![a-z])/i;
 
@@ -90,7 +91,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     return {
       realPath: this.formatPathParts(res?.path || []),
       hasCover: this.hasCoverFile(files),
-      hasSubtitle: files.some((file) => this.subtitleFileReg.test(file.n || file.name || file.file_name || "")),
+      subtitleFiles: files.filter((file) => this.subtitleFileReg.test(file.n || file.name || file.file_name || "")),
     };
   }
 
@@ -109,15 +110,30 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     return Boolean(videoStem && subtitleStem && (subtitleStem === videoStem || subtitleStem.startsWith(`${videoStem}.`) || subtitleStem.startsWith(`${videoStem} `) || subtitleStem.startsWith(`${videoStem}-`)));
   }
 
+  static hasMatchingDetailCode(video = {}, attachment = {}, details = {}) {
+    const videoName = video.n || video.name || video.file_name || "";
+    const attachmentName = attachment.n || attachment.name || attachment.file_name || "";
+    return Boolean(details.regex?.test(videoName) && details.regex.test(attachmentName));
+  }
+
+  static belongsToVideoSubtitleFile(video = {}, subtitle = {}, details = {}) {
+    const name = subtitle.n || subtitle.name || subtitle.file_name || "";
+    if (!this.subtitleFileReg.test(name)) return false;
+    if (this.belongsToVideoSubtitle(video, subtitle)) return true;
+
+    // Historical actor folders often use a different release name for the
+    // subtitle.  Use the current JavDB code only as a narrow fallback.
+    return this.hasMatchingDetailCode(video, subtitle, details);
+  }
+
   static belongsToArchiveBundle(video = {}, attachment = {}, details = {}) {
     const name = attachment.n || attachment.name || attachment.file_name || "";
     if (!this.archiveAttachmentFileReg.test(name)) return false;
-    if (this.belongsToVideoSubtitle(video, attachment)) return true;
+    if (this.subtitleFileReg.test(name)) return this.belongsToVideoSubtitleFile(video, attachment, details);
 
-    // Historical actor folders often use a different release name for the
-    // subtitle/NFO.  The page-derived code regex is a narrowly-scoped fallback
-    // and accepts only attachments that still belong to this title's code.
-    return Boolean(details.regex?.test(name));
+    // NFO files use the same code fallback as subtitles, while other file types
+    // never qualify as archive attachments.
+    return this.belongsToVideoSubtitle(video, attachment) || this.hasMatchingDetailCode(video, attachment, details);
   }
 
   static getArchiveBundleFiles(sourceFiles = [], video = {}, details = {}) {
@@ -127,9 +143,11 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       .map((item) => this.normalizeFile(item));
   }
 
-  static async enrichMetadata(items = [], req115) {
-    const cids = [...new Set(items.filter((item) => item?.cid && (!item.realPath || !item.paths?.length || item.hasCover === undefined || item.hasSubtitle === undefined)).map((item) => item.cid))];
-    const entries = await Promise.all(cids.map(async (cid) => [cid, await this.resolveMetadata(req115, cid).catch(() => ({ realPath: "", hasCover: false, hasSubtitle: false }))]));
+  static async enrichMetadata(items = [], req115, details = {}) {
+    const cids = [...new Set(items
+      .filter((item) => item?.cid && (!item.realPath || !item.paths?.length || item.hasCover === undefined || item.subtitleDetectionVersion !== this.subtitleDetectionVersion))
+      .map((item) => item.cid))];
+    const entries = await Promise.all(cids.map(async (cid) => [cid, await this.resolveMetadata(req115, cid).catch(() => ({ realPath: "", hasCover: false, subtitleFiles: [] }))]));
     const metadata = new Map(entries);
 
     for (const item of items) {
@@ -137,14 +155,15 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       if (!meta) continue;
       if (meta.realPath && !item.realPath) item.realPath = meta.realPath;
       if (item.hasCover === undefined) item.hasCover = meta.hasCover;
-      if (item.hasSubtitle === undefined) item.hasSubtitle = meta.hasSubtitle;
+      item.hasSubtitle = meta.subtitleFiles.some((subtitle) => this.belongsToVideoSubtitleFile(item, subtitle, details));
+      item.subtitleDetectionVersion = this.subtitleDetectionVersion;
     }
 
     return items;
   }
 
-  static enrichDirectories(items = [], req115) {
-    return this.enrichMetadata(items, req115);
+  static enrichDirectories(items = [], req115, details = {}) {
+    return this.enrichMetadata(items, req115, details);
   }
 
   static buildTargetDir(details = {}) {
