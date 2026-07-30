@@ -5,7 +5,8 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
   static zhReg = /中文|中字|字幕|\[[a-z]?hdc[a-z]?\]|[-_\s]+(uc|c|ch|cu|zh)(?![a-z])/i;
 
   static subtitleFileReg = /\.(srt|ass|ssa|vtt|sub)$/i;
-  static crackReg = /无码破解|無碼破解|流出|破解|解密版|uncensored|破[\u4E00-\u9FC6]版|[-_\s]+(cu|u|uc)(?![a-z])/i;
+  static archiveAttachmentFileReg = /\.(srt|ass|ssa|vtt|sub|nfo)$/i;
+  static crackReg = /无码破解|無碼破解|流出|破解|解密版|uncensored|restored|破[\u4E00-\u9FC6]版|[-_\s]+(cu|u|uc)(?![a-z])/i;
 
   static escapeHtml(value = "") {
     return String(value)
@@ -106,6 +107,24 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     const videoStem = this.subtitleStem(video.n || video.name || video.file_name || "");
     const subtitleStem = this.subtitleStem(subtitle.n || subtitle.name || subtitle.file_name || "");
     return Boolean(videoStem && subtitleStem && (subtitleStem === videoStem || subtitleStem.startsWith(`${videoStem}.`) || subtitleStem.startsWith(`${videoStem} `) || subtitleStem.startsWith(`${videoStem}-`)));
+  }
+
+  static belongsToArchiveBundle(video = {}, attachment = {}, details = {}) {
+    const name = attachment.n || attachment.name || attachment.file_name || "";
+    if (!this.archiveAttachmentFileReg.test(name)) return false;
+    if (this.belongsToVideoSubtitle(video, attachment)) return true;
+
+    // Historical actor folders often use a different release name for the
+    // subtitle/NFO.  The page-derived code regex is a narrowly-scoped fallback
+    // and accepts only attachments that still belong to this title's code.
+    return Boolean(details.regex?.test(name));
+  }
+
+  static getArchiveBundleFiles(sourceFiles = [], video = {}, details = {}) {
+    return sourceFiles
+      .filter((item) => !video?.fid || String(item?.fid || "") !== String(video.fid))
+      .filter((item) => this.belongsToArchiveBundle(video, item, details))
+      .map((item) => this.normalizeFile(item));
   }
 
   static async enrichMetadata(items = [], req115) {
@@ -222,12 +241,11 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     const targetCid = await req115.handleDir(targetDir);
     if (!targetCid) throw new Error("目标目录创建失败");
 
-    const { data: srts = [] } = await req115.filesAllSRTs(file.cid);
-    // `filesAllSRTs(cid)` returns every SRT in the folder.  Filter it by the
-    // chosen video's basename so archiving one title from a collection never
-    // moves its neighbours' subtitles.
-    const subtitles = srts.filter((srt) => this.belongsToVideoSubtitle(file, srt));
-    const files = [file, ...subtitles.map((srt) => this.normalizeFile(srt))];
+    const { data: sourceFiles = [] } = await req115.filesAll(file.cid);
+    // Prefer the selected video's basename.  When an old actor directory uses
+    // different release names, allow only subtitle/NFO attachments whose
+    // filename still matches the current JavDB code.
+    const files = [file, ...this.getArchiveBundleFiles(sourceFiles, file, details)];
 
     if (String(file.cid) !== String(targetCid)) {
       const moveRes = await req115.filesMove(files.map((it) => it.fid), targetCid);

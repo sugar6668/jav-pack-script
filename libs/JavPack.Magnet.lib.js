@@ -1,7 +1,7 @@
 // eslint-disable-next-line no-unused-vars, unused-imports/no-unused-vars
 class Magnet {
   static zhReg = /中文|中字|字幕|\[[a-z]?hdc[a-z]?\]|[-_\s]+(uc|c|ch|cu|zh)(?![a-z])/i;
-  static crackReg = /无码|無碼|流出|破解|解密版|uncensored|破[\u4E00-\u9FC6]版|[-_\s]+(cu|u|uc)(?![a-z])/i;
+  static crackReg = /无码|無碼|流出|破解|解密版|uncensored|restored|破[\u4E00-\u9FC6]版|[-_\s]+(cu|u|uc)(?![a-z])/i;
 
   static useTransByte() {
     const rules = [

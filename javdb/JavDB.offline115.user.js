@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.offline115
 // @namespace       JavDB.offline115@blc
-// @version         0.0.2
+// @version         0.0.3
 // @author          blc
 // @description     115 网盘离线
 // @match           https://javdb.com/*
@@ -128,7 +128,7 @@ const setConfig = async (e) => {
 };
 
 const TARGET_CLASS = "x-offline";
-const CRACK_REG = /无码破解|無碼破解|流出|破解|解密版|uncensored|破[\u4E00-\u9FC6]版|[-_\s]+(cu|u|uc)(?![a-z])/i;
+const CRACK_REG = /无码破解|無碼破解|流出|破解|解密版|uncensored|restored|破[\u4E00-\u9FC6]版|[-_\s]+(cu|u|uc)(?![a-z])/i;
 const LOAD_CLASS = "is-loading";
 
 const MATCH_API = "reMatch";
