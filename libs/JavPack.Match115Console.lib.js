@@ -155,7 +155,10 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       if (!meta) continue;
       if (meta.realPath && !item.realPath) item.realPath = meta.realPath;
       if (item.hasCover === undefined) item.hasCover = meta.hasCover;
-      item.hasSubtitle = meta.subtitleFiles.some((subtitle) => this.belongsToVideoSubtitleFile(item, subtitle, details));
+      item.subtitleFiles = meta.subtitleFiles
+        .filter((subtitle) => this.belongsToVideoSubtitleFile(item, subtitle, details))
+        .map((subtitle) => ({ n: subtitle.n || subtitle.name || subtitle.file_name || "", s: subtitle.s || 0 }));
+      item.hasSubtitle = Boolean(item.subtitleFiles.length);
       item.subtitleDetectionVersion = this.subtitleDetectionVersion;
     }
 
@@ -219,12 +222,13 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     const safeActorPreview = this.escapeHtml(this.buildPreview(details, file, "actor"));
     const safeCodePreview = this.escapeHtml(this.buildPreview(details, file, "code"));
     const safeRenamePreview = this.escapeHtml(this.buildPreview(details, file));
+    const safeSubtitleFiles = this.escapeHtml(JSON.stringify(file.subtitleFiles || []));
     const coverClass = file.hasCover ? "is-success" : "is-info";
     const coverText = file.hasCover ? "已有封面" : "传封面";
     const coverDisabled = file.hasCover ? " disabled" : "";
 
     return `
-      <div class="zymatch-item" data-fid="${this.escapeHtml(file.fid || "")}" data-cid="${this.escapeHtml(file.cid || "")}">
+      <div class="zymatch-item" data-fid="${this.escapeHtml(file.fid || "")}" data-cid="${this.escapeHtml(file.cid || "")}" data-has-subtitle="${file.hasSubtitle ? "1" : "0"}" data-subtitle-files="${safeSubtitleFiles}">
         <a
           href="javascript:void(0);"
           class="x-match button is-small is-light"

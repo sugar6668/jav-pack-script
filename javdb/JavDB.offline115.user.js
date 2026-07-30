@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.offline115
 // @namespace       JavDB.offline115@blc
-// @version         0.0.3
+// @version         0.0.5
 // @author          blc
 // @description     115 网盘离线
 // @match           https://javdb.com/*
@@ -492,6 +492,12 @@ const offline = async ({ options, magnets, onstart, onprogress, onfinally }, cur
   window.JavPackSubtitle?.ensureDetailButton({
     details,
     getTargetCid: () => document.querySelector(".x-match-cont .zymatch-item [data-cid]")?.dataset.cid || "",
+    getSubtitleEntries: () => [...document.querySelectorAll('.x-match-cont .zymatch-item[data-has-subtitle="1"]')]
+      .map((node) => {
+        let files = [];
+        try { files = JSON.parse(node.dataset.subtitleFiles || "[]"); } catch (_) {}
+        return { directory: node.querySelector(".x-match-dir")?.textContent.trim(), files };
+      }),
   });
   document.addEventListener("click", onclick);
 })();

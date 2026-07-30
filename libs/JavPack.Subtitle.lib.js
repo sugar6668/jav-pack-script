@@ -76,7 +76,7 @@ window.JavPackSubtitle = class JavPackSubtitle {
       || "";
   }
 
-  static ensureDetailButton({ details, getTargetCid } = {}) {
+  static ensureDetailButton({ details, getTargetCid, getSubtitleEntries } = {}) {
     const panel = document.querySelector(".movie-panel-info");
     const buttons = panel?.querySelector(".panel-block:last-child .buttons");
     if (!buttons || document.getElementById(this.BTN_ID)) return;
@@ -86,6 +86,26 @@ window.JavPackSubtitle = class JavPackSubtitle {
     btn.type = "button";
     btn.className = "button is-small is-info x-subtitle-search";
     btn.textContent = "字幕搜索";
+    const refreshSubtitleFileTip = () => {
+      const groups = new Map();
+      (getSubtitleEntries?.() || []).forEach(({ directory, files = [] }) => {
+        const path = String(directory || "").trim();
+        if (!path) return;
+        if (!groups.has(path)) groups.set(path, new Set());
+        files.map((file) => String(file?.n || file?.name || file || "").trim())
+          .filter(Boolean)
+          .forEach((name) => groups.get(path).add(name));
+      });
+
+      btn.title = groups.size
+        ? ["已有字幕文件：", ...[...groups].flatMap(([path, files]) => [
+          `目录：${path}`,
+          ...[...files].map((name) => `  - ${name}`),
+        ])].join("\n")
+        : "暂无已匹配的字幕文件";
+    };
+    btn.addEventListener("mouseenter", refreshSubtitleFileTip);
+    btn.addEventListener("focus", refreshSubtitleFileTip);
     btn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -394,7 +414,7 @@ window.JavPackSubtitle = class JavPackSubtitle {
         // forwarded to the source card, so the subtitle SVG does not depend on
         // iframe unload timing or a delayed 115 search.
         window.dispatchEvent(new CustomEvent("JavDB_SubtitleUploaded", {
-          detail: { code: details.code || "", cid: String(cid) },
+          detail: { code: details.code || "", cid: String(cid), subtitle: { n: filename, s: buffer.byteLength } },
         }));
         overlay.remove();
         this.clearPreviewCache();

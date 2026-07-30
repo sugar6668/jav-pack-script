@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.9
+// @version         0.0.11
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -362,9 +362,23 @@ const getPageDetails = (dom = document) => {
   window.addEventListener("JavDB_SubtitleUploaded", ({ detail }) => {
     if (detail?.code && String(detail.code).trim().toUpperCase() !== String(code).trim().toUpperCase()) return;
     const cid = String(detail?.cid || "");
+    const uploadedSubtitle = detail?.subtitle;
     const cache = MatchCache.get(code) || [];
-    const next = cache.map((file) => String(file.cid) === cid ? { ...file, hasSubtitle: true } : file);
+    const next = cache.map((file) => {
+      if (String(file.cid) !== cid) return file;
+      const subtitleFiles = [...(file.subtitleFiles || []), uploadedSubtitle]
+        .filter(Boolean)
+        .filter((file, index, files) => files.findIndex((item) => item.n === file.n) === index);
+      return { ...file, hasSubtitle: true, subtitleFiles };
+    });
     MatchCache.set(code, next);
+    [...block.cont.querySelectorAll(".zymatch-item")]
+      .filter((node) => String(node.dataset.cid) === cid)
+      .forEach((node) => {
+        node.dataset.hasSubtitle = "1";
+        const file = next.find((item) => String(item.fid) === String(node.dataset.fid));
+        node.dataset.subtitleFiles = JSON.stringify(file?.subtitleFiles || []);
+      });
     syncQuickViewState("subtitle", next);
   });
   window.addEventListener("beforeunload", () => CHANNEL.postMessage(code));
