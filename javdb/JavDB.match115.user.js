@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.12
+// @version         0.0.13
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -632,7 +632,7 @@ const getPageDetails = (dom = document) => {
     CHANNEL.postMessage(code);
   };
 
-  const matchCode = async (node) => {
+  const matchCode = async (node, { refreshOnError = true } = {}) => {
     const movie = node.closest(MOVIE_SELECTOR);
     if (!movie) return;
 
@@ -645,18 +645,21 @@ const getPageDetails = (dom = document) => {
     const UUID = crypto.randomUUID();
     target.dataset.uid = UUID;
 
+    let refreshed = false;
     try {
       const { data = [] } = await Req115.filesSearchAllVideos(codes.join(" "));
       if (target.dataset.uid !== UUID) return;
 
       const sources = await enrichMetadata(extractData(data.filter((it) => regex.test(it.n))), details);
       MatchCache.set(code, sources);
+      refreshed = true;
     } catch (err) {
       if (target.dataset.uid !== UUID) return;
       Util.print(err?.message);
     }
 
-    publish(code);
+    if (refreshed || refreshOnError) publish(code);
+    return refreshed;
   };
 
   const refresh = ({ type, target }) => {
@@ -681,11 +684,24 @@ const getPageDetails = (dom = document) => {
     const target = button.parentElement?.querySelector(`.${TARGET_CLASS}`);
     if (!target) return;
 
+    const code = target.closest(MOVIE_SELECTOR)?.querySelector(CODE_SELECTOR)?.textContent.trim();
+    if (!code) return;
+
     button.disabled = true;
     button.classList.add("is-loading");
+    // A force refresh must never let the queue fall back to this card's old result.
+    MatchCache.del(code);
+    target.className = `tag is-normal ${TARGET_CLASS}`;
+    target.dataset.pc = "";
+    target.dataset.cid = "";
+    target.textContent = TARGET_TXT;
+    target.title = "正在从 115 重新搜索";
     try {
-      // Keep the last known match intact until the remote search has a result.
-      await matchCode(target);
+      const refreshed = await matchCode(target, { refreshOnError: false });
+      if (!refreshed) {
+        target.textContent = "重新匹配失败";
+        target.title = "重新匹配失败，点击 ↻ 再试";
+      }
     } finally {
       button.disabled = false;
       button.classList.remove("is-loading");
@@ -693,6 +709,6 @@ const getPageDetails = (dom = document) => {
   };
 
   unsafeWindow[MATCH_API] = matchCode;
-  document.addEventListener("click", forceMatch);
+  document.addEventListener("click", forceMatch, true);
   listenClick(matchCode, refresh);
 })();

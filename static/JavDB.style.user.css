@@ -530,11 +530,16 @@ html.x-actor-matched-only .movie-list .item:not(:has(.x-match:not(.is-normal))) 
       }
 
       .x-match-force {
-        min-width: 1.6em;
+        display: inline-flex;
+        width: 1.75em;
+        height: 1.75em;
+        min-width: 1.75em;
         margin-right: calc(0.375rem - 1px);
-        padding: 0 0.35em;
+        padding: 0;
+        align-items: center;
+        justify-content: center;
         border: 0;
-        border-radius: 99px;
+        border-radius: 50%;
         cursor: pointer;
         font-weight: 700;
         line-height: inherit;
