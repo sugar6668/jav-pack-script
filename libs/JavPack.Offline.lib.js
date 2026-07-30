@@ -111,6 +111,7 @@ class Offline {
       codes,
       regex,
       code: details.code,
+      isVR: Boolean(details.isVR),
       uncensored: Boolean(details.uncensored),
       cover: options.cover ? cover : "",
       rename: this.parseVar(rename, details),

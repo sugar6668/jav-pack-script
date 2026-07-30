@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.13
+// @version         0.0.15
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -180,7 +180,7 @@ const extractData = (data, format = "s") => {
   const keys = ["pc", "cid", "fid", "n", "s", "t", "ico", "paths", "realPath", "name", "file_name"];
   return data.map((item) => {
     const source = JSON.parse(JSON.stringify(item, keys));
-    return { ...source, [format]: formatBytes(item[format]) };
+    return { ...source, bytes: Number(item[format]) || 0, [format]: formatBytes(item[format]) };
   });
 };
 
@@ -205,9 +205,63 @@ const formatHoverLine = (label, value = "", max = 96) => {
 
 const formatTip = (item) => [
   formatHoverLine("视频", item.n),
-  item.s && `大小：${item.s}`,
+  item.s && `大小：${item.s}${item.videoCount ? ` · ${item.videoCount} 个视频` : ""}`,
   formatHoverLine("目录", formatDirectory(item)),
 ].filter(Boolean).join("\n");
+
+const isVrTitle = (value = "") => /【\s*VR\s*】/i.test(String(value));
+
+const getItemBytes = (item = {}) => {
+  if (item.bytes !== undefined && Number.isFinite(Number(item.bytes))) return Number(item.bytes);
+
+  const match = String(item.s || "").match(/^([\d.]+)\s*(KB|MB|GB|TB)$/i);
+  if (!match) return 0;
+
+  const powers = { KB: 1, MB: 2, GB: 3, TB: 4 };
+  return Number(match[1]) * (1024 ** powers[match[2].toUpperCase()]);
+};
+
+const pickActiveMatch = (items = []) => {
+  const zhs = items.filter((item) => Magnet.zhReg.test(item.n));
+  const crack = items.find((item) => Magnet.crackReg.test(item.n));
+  const both = zhs.find((item) => Magnet.crackReg.test(item.n));
+  return both ?? zhs[0] ?? crack ?? items[0];
+};
+
+const uniqueBy = (items = [], key) => items.filter((item, index) => {
+  const value = String(item?.[key] || "");
+  return value && items.findIndex((candidate) => String(candidate?.[key] || "") === value) === index;
+});
+
+// Keep the persisted cache as individual files.  VR presentation is derived
+// from it so normal matches and cross-window cache synchronization stay intact.
+const getPresentationItems = (sources = [], details = {}) => {
+  if (!details.isVR) return sources;
+
+  const groups = new Map();
+  sources.forEach((item) => {
+    const key = String(item.cid || item.fid || item.pc || item.n || "");
+    if (!key) return;
+    groups.get(key)?.push(item) ?? groups.set(key, [item]);
+  });
+
+  return [...groups.values()].map((members) => {
+    const active = pickActiveMatch(members);
+    const subtitleFiles = uniqueBy(members.flatMap((item) => item.subtitleFiles || []), "n");
+    const totalBytes = members.reduce((sum, item) => sum + getItemBytes(item), 0);
+
+    return {
+      ...active,
+      isVrBundle: true,
+      members,
+      videoCount: members.length,
+      bytes: totalBytes,
+      s: formatBytes(totalBytes),
+      hasSubtitle: members.some((item) => item.hasSubtitle),
+      subtitleFiles,
+    };
+  });
+};
 
 const enrichMetadata = async (sources, details = {}) => {
   if (!window.JavPackMatch115Console?.enrichMetadata) return sources;
@@ -233,6 +287,7 @@ const getPageDetails = (dom = document) => {
     ...Util.codeParse(code),
     title,
     actors,
+    isVR: isVrTitle(titleNode?.textContent),
     isUncensored: /无码|無碼/i.test(titleNode?.textContent || ""),
     cover: dom.querySelector(".video-cover")?.src || "",
   };
@@ -260,6 +315,10 @@ const getPageDetails = (dom = document) => {
     `;
   };
 
+  const renderMatches = (sources = []) => getPresentationItems(sources, codeDetails)
+    .map((item) => render(item, codeDetails))
+    .join("") || "暂无匹配";
+
   const matchCode = async ({ code, codes, regex }, { load, cont }) => {
     const UUID = crypto.randomUUID();
     load.dataset.uid = UUID;
@@ -269,7 +328,7 @@ const getPageDetails = (dom = document) => {
       if (load.dataset.uid !== UUID) return;
 
       const sources = await enrichMetadata(extractData(data.filter((it) => regex.test(it.n))), { code, codes, regex });
-      cont.innerHTML = sources.map((item) => render(item, codeDetails)).join("") || "暂无匹配";
+      cont.innerHTML = renderMatches(sources);
       MatchCache.set(code, sources);
     } catch (err) {
       if (load.dataset.uid !== UUID) return;
@@ -311,7 +370,7 @@ const getPageDetails = (dom = document) => {
   const matcher = (force = false) => {
     const cache = force ? null : MatchCache.get(code);
     if (cache !== null) {
-      block.cont.innerHTML = cache.map((item) => render(item, codeDetails)).join("") || "暂无匹配";
+      block.cont.innerHTML = renderMatches(cache);
       block.load.textContent = "115";
       return;
     }
@@ -345,8 +404,9 @@ const getPageDetails = (dom = document) => {
     details: codeDetails,
     removeFromCache: (item, action) => {
       const cache = MatchCache.get(code) || [];
+      const memberFids = new Set((item.members || []).map((member) => String(member.fid)).filter(Boolean));
       const next = cache.filter((file) => {
-        if (action === "delv") return String(file.fid) !== String(item.fid);
+        if (action === "delv") return !memberFids.has(String(file.fid)) && String(file.fid) !== String(item.fid);
         if (action === "delf") return String(file.cid) !== String(item.cid);
         return true;
       });
@@ -372,13 +432,7 @@ const getPageDetails = (dom = document) => {
       return { ...file, hasSubtitle: true, subtitleFiles };
     });
     MatchCache.set(code, next);
-    [...block.cont.querySelectorAll(".zymatch-item")]
-      .filter((node) => String(node.dataset.cid) === cid)
-      .forEach((node) => {
-        node.dataset.hasSubtitle = "1";
-        const file = next.find((item) => String(item.fid) === String(node.dataset.fid));
-        node.dataset.subtitleFiles = JSON.stringify(file?.subtitleFiles || []);
-      });
+    block.cont.innerHTML = renderMatches(next);
     syncQuickViewState("subtitle", next);
   });
   window.addEventListener("beforeunload", () => CHANNEL.postMessage(code));
@@ -456,13 +510,15 @@ const getPageDetails = (dom = document) => {
       const both = zhs.find((it) => Magnet.crackReg.test(it.n));
       const active = both ?? zh ?? crack ?? sources[0];
       const types = getMatchTypes(sources);
+      const isVR = Boolean(target.dataset.isVr === "1");
+      const presentation = getPresentationItems(sources, { isVR });
 
       pc = active.pc;
       cid = active.cid;
-      title = sources.map(formatTip).join("\n\n");
+      title = presentation.map(formatTip).join("\n\n");
       className = both ? "is-danger" : zh ? "is-warning" : crack ? "is-info" : "is-success";
       textContent = "已匹配";
-      if (len > 1) textContent += ` ${len}`;
+      if (len > 1 && !isVR) textContent += ` ${len}`;
 
       itemNode.classList.toggle("x-multi-matched", types.length > 1);
       itemNode.dataset.matchTypes = types.join(" ");
@@ -481,6 +537,8 @@ const getPageDetails = (dom = document) => {
     node.dataset.cid = cid;
     node.textContent = textContent;
     forceButton?.classList.toggle("is-hidden", !len);
+    forceButton?.classList.remove("is-loading");
+    if (forceButton) forceButton.disabled = false;
   };
 
   const matchBefore = (node) => {
@@ -495,6 +553,7 @@ const getPageDetails = (dom = document) => {
     if (!target.querySelector(`.${TARGET_CLASS}`)) target.insertAdjacentHTML("afterbegin", TARGET_HTML);
 
     const parsed = Util.codeParse(code);
+    target.dataset.isVr = isVrTitle(target.textContent) ? "1" : "";
     return { ...parsed, searchKey: parsed.codes.join(" "), target };
   };
 
@@ -632,7 +691,7 @@ const getPageDetails = (dom = document) => {
     CHANNEL.postMessage(code);
   };
 
-  const matchCode = async (node, { refreshOnError = true } = {}) => {
+  const matchCode = async (node) => {
     const movie = node.closest(MOVIE_SELECTOR);
     if (!movie) return;
 
@@ -640,26 +699,26 @@ const getPageDetails = (dom = document) => {
     const target = movie.querySelector(`.${TARGET_CLASS}`);
     if (!code || !target) return;
 
-    const details = Util.codeParse(code);
+    const details = {
+      ...Util.codeParse(code),
+      isVR: isVrTitle(movie.querySelector(".video-title")?.textContent),
+    };
     const { codes, regex } = details;
     const UUID = crypto.randomUUID();
     target.dataset.uid = UUID;
 
-    let refreshed = false;
     try {
       const { data = [] } = await Req115.filesSearchAllVideos(codes.join(" "));
       if (target.dataset.uid !== UUID) return;
 
       const sources = await enrichMetadata(extractData(data.filter((it) => regex.test(it.n))), details);
       MatchCache.set(code, sources);
-      refreshed = true;
     } catch (err) {
       if (target.dataset.uid !== UUID) return;
       Util.print(err?.message);
     }
 
-    if (refreshed || refreshOnError) publish(code);
-    return refreshed;
+    publish(code);
   };
 
   const refresh = ({ type, target }) => {
@@ -673,7 +732,7 @@ const getPageDetails = (dom = document) => {
     if (code) setTimeout(publish, 750, code);
   };
 
-  const forceMatch = async (event) => {
+  const forceMatch = (event) => {
     const button = event.target.closest(`.${FORCE_MATCH_CLASS}`);
     if (!button || button.disabled) return;
 
@@ -684,28 +743,20 @@ const getPageDetails = (dom = document) => {
     const target = button.parentElement?.querySelector(`.${TARGET_CLASS}`);
     if (!target) return;
 
-    const code = target.closest(MOVIE_SELECTOR)?.querySelector(CODE_SELECTOR)?.textContent.trim();
-    if (!code) return;
+    const movie = target.closest(MOVIE_SELECTOR);
+    const code = movie?.querySelector(CODE_SELECTOR)?.textContent.trim();
+    if (!movie || !code) return;
 
     button.disabled = true;
     button.classList.add("is-loading");
-    // A force refresh must never let the queue fall back to this card's old result.
+    // Delete only this card's stored state, then return to the normal match queue.
     MatchCache.del(code);
     target.className = `tag is-normal ${TARGET_CLASS}`;
     target.dataset.pc = "";
     target.dataset.cid = "";
     target.textContent = TARGET_TXT;
-    target.title = "正在从 115 重新搜索";
-    try {
-      const refreshed = await matchCode(target, { refreshOnError: false });
-      if (!refreshed) {
-        target.textContent = "重新匹配失败";
-        target.title = "重新匹配失败，点击 ↻ 再试";
-      }
-    } finally {
-      button.disabled = false;
-      button.classList.remove("is-loading");
-    }
+    target.title = "";
+    matchQueue([movie], { force: true });
   };
 
   unsafeWindow[MATCH_API] = matchCode;

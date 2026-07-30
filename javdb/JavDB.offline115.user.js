@@ -292,6 +292,7 @@ const getDetails = (dom = document) => {
   const origin = titleNode.querySelector(".origin-title");
   const current = titleNode.querySelector(".current-title");
   info.title = `${label}${(origin ?? current).textContent}`.replace(code, "").trim();
+  info.isVR = /【\s*VR\s*】/i.test(titleNode.textContent || "");
   info.uncensored = /无码|無碼/i.test(titleNode.textContent || "");
 
   infoNode.querySelectorAll(":scope > .panel-block").forEach((item) => {

@@ -247,6 +247,7 @@ class Req115 extends Drive115 {
 
     let file_id = "";
     let videos = [];
+    let allVideos = [];
 
     for (let index = 0; index < max; index++) {
       if (index) await sleep();
@@ -259,12 +260,13 @@ class Req115 extends Drive115 {
       if (file_id) break;
     }
 
-    if (!file_id) return { file_id, videos };
+    if (!file_id) return { file_id, videos, allVideos };
 
     for (let index = 0; index < max; index++) {
       if (index) await sleep();
       const { data } = await this.filesAllVideos(file_id);
 
+      allVideos = data;
       videos = data.filter((item) => regex.test(item.n));
       if (videos.length) break;
     }
@@ -275,6 +277,7 @@ class Req115 extends Drive115 {
 
       if (task.status === 2) {
         const { data } = await this.filesAllVideos(file_id);
+        allVideos = data;
         codes = codes.map((code) => code.toUpperCase());
 
         videos = data.filter((item) => {
@@ -284,7 +287,7 @@ class Req115 extends Drive115 {
       }
     }
 
-    return { videos: videos.filter(filter), file_id };
+    return { videos: videos.filter(filter), allVideos, file_id };
   }
 
   static async handleClean(keepFiles, cid) {
@@ -363,7 +366,7 @@ class Req115 extends Drive115 {
   }
 
   static async handleOffline(
-    { dir, regex, codes, verifyOptions, code, rename, renameTxt, tags, clean, cover, uncensored },
+    { dir, regex, codes, verifyOptions, code, rename, renameTxt, tags, clean, cover, isVR, uncensored },
     magnets,
   ) {
     const res = { status: "error", msg: `获取目录失败: ${dir.join("/")}` };
@@ -383,7 +386,7 @@ class Req115 extends Drive115 {
         break;
       }
 
-      const { videos, file_id } = await this.handleVerify(info_hash, { regex, codes }, verifyOptions);
+      const { videos, allVideos = [], file_id } = await this.handleVerify(info_hash, { regex, codes }, verifyOptions);
 
       if (!videos.length) {
         if (verifyOptions.clean) this.lixianTaskDel([info_hash]);
@@ -394,12 +397,16 @@ class Req115 extends Drive115 {
         continue;
       }
 
+      // A verified VR torrent can contain several camera/angle files.  Keep
+      // the whole task's video set in its one 115 task directory instead of
+      // cleaning everything except the filename that matched the code.
+      const bundleVideos = isVR && allVideos.length ? allVideos : videos;
       const { data: srts = [] } = await this.filesAllSRTs(file_id);
-      const files = [...videos, ...srts];
+      const files = [...bundleVideos, ...srts];
 
       if (clean) await this.handleClean(files, file_id);
 
-      if (tags.length) this.handleTags(videos, tags);
+      if (tags.length) this.handleTags(bundleVideos, tags);
 
       if (rename) this.handleRename(files, file_id, { rename, renameTxt, zh: zh || srts.length, crack, uncensored: uncensored || magnetUncensored });
 

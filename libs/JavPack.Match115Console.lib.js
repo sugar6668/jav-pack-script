@@ -46,7 +46,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
   static formatItemTip(file = {}, path = this.formatDirectory(file)) {
     return [
       this.formatHoverLine("视频", file.n || file.name || file.file_name || ""),
-      file.s && `大小：${file.s}`,
+      file.s && `大小：${file.s}${file.videoCount ? ` · ${file.videoCount} 个视频` : ""}`,
       this.formatHoverLine("目录", path || ""),
     ].filter(Boolean).join("\n");
   }
@@ -143,6 +143,32 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       .map((item) => this.normalizeFile(item));
   }
 
+  static getBundleMembers(item = {}) {
+    const source = Array.isArray(item.members) && item.members.length ? item.members : [item];
+    const seen = new Set();
+    return source
+      .filter((file) => file?.fid)
+      .filter((file) => {
+        const fid = String(file.fid);
+        if (seen.has(fid)) return false;
+        seen.add(fid);
+        return true;
+      })
+      .map((file) => this.normalizeFile(file));
+  }
+
+  static getBundleAttachments(sourceFiles = [], videos = [], details = {}) {
+    const videoFids = new Set(videos.map((file) => String(file.fid)));
+    const files = videos.flatMap((video) => this.getArchiveBundleFiles(sourceFiles, video, details));
+    const seen = new Set(videoFids);
+    return files.filter((file) => {
+      const fid = String(file.fid || "");
+      if (!fid || seen.has(fid)) return false;
+      seen.add(fid);
+      return true;
+    });
+  }
+
   static async enrichMetadata(items = [], req115, details = {}) {
     const cids = [...new Set(items
       .filter((item) => item?.cid && (!item.realPath || !item.paths?.length || item.hasCover === undefined || item.subtitleDetectionVersion !== this.subtitleDetectionVersion))
@@ -213,8 +239,11 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
   static renderItem(item, details = {}) {
     const file = this.normalizeFile(item);
     const path = this.formatDirectory(file);
-    const tip = this.formatItemTip(file, path);
-    const safeName = this.escapeHtml(file.n);
+    const members = this.getBundleMembers(item);
+    const videoCount = Number(file.videoCount) || members.length;
+    const displayName = file.isVrBundle && videoCount > 1 ? `${file.n} 等 ${videoCount} 个视频` : file.n;
+    const tip = this.formatItemTip({ ...file, n: displayName, videoCount: file.isVrBundle ? videoCount : 0 }, path);
+    const safeName = this.escapeHtml(displayName);
     const safePath = this.escapeHtml(path);
     const safeTip = this.escapeHtml(tip);
     const safeActorDir = this.escapeHtml(this.buildArchiveDir(details, "actor").join("/"));
@@ -223,12 +252,13 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     const safeCodePreview = this.escapeHtml(this.buildPreview(details, file, "code"));
     const safeRenamePreview = this.escapeHtml(this.buildPreview(details, file));
     const safeSubtitleFiles = this.escapeHtml(JSON.stringify(file.subtitleFiles || []));
+    const safeMembers = this.escapeHtml(JSON.stringify(members));
     const coverClass = file.hasCover ? "is-success" : "is-info";
     const coverText = file.hasCover ? "已有封面" : "传封面";
     const coverDisabled = file.hasCover ? " disabled" : "";
 
     return `
-      <div class="zymatch-item" data-fid="${this.escapeHtml(file.fid || "")}" data-cid="${this.escapeHtml(file.cid || "")}" data-has-subtitle="${file.hasSubtitle ? "1" : "0"}" data-subtitle-files="${safeSubtitleFiles}">
+      <div class="zymatch-item" data-fid="${this.escapeHtml(file.fid || "")}" data-cid="${this.escapeHtml(file.cid || "")}" data-vr-bundle="${file.isVrBundle ? "1" : "0"}" data-members="${safeMembers}" data-has-subtitle="${file.hasSubtitle ? "1" : "0"}" data-subtitle-files="${safeSubtitleFiles}">
         <a
           href="javascript:void(0);"
           class="x-match button is-small is-light"
@@ -260,6 +290,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
 
   static async archiveMatched({ req115, item, details, dir }) {
     const file = this.normalizeFile(item);
+    const videos = this.getBundleMembers(item);
     const targetDir = (dir?.length ? dir : this.buildTargetDir(details)).map((part) => this.sanitizeName(part)).filter(Boolean);
     const targetCid = await req115.handleDir(targetDir);
     if (!targetCid) throw new Error("目标目录创建失败");
@@ -268,7 +299,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     // Prefer the selected video's basename.  When an old actor directory uses
     // different release names, allow only subtitle/NFO attachments whose
     // filename still matches the current JavDB code.
-    const files = [file, ...this.getArchiveBundleFiles(sourceFiles, file, details)];
+    const files = [...videos, ...this.getBundleAttachments(sourceFiles, videos, details)];
 
     if (String(file.cid) !== String(targetCid)) {
       const moveRes = await req115.filesMove(files.map((it) => it.fid), targetCid);
@@ -315,10 +346,11 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
 
   static async renameMatched({ req115, item, details }) {
     const file = this.normalizeFile(item);
+    const videos = this.getBundleMembers(item);
     const { data: srts = [] } = await req115.filesAllSRTs(file.cid).catch(() => ({ data: [] }));
-    const subtitles = srts.filter((srt) => this.belongsToVideoSubtitle(file, srt));
-    const files = [file, ...subtitles.map((srt) => this.normalizeFile(srt))];
-    const rename = this.buildRename(details, [file]);
+    const subtitles = srts.filter((srt) => videos.some((video) => this.belongsToVideoSubtitleFile(video, srt, details)));
+    const files = [...videos, ...subtitles.map((srt) => this.normalizeFile(srt))];
+    const rename = this.buildRename(details, videos);
 
     await req115.handleRename(files, file.cid, {
       rename,
@@ -332,7 +364,8 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
 
   static async deleteMatched({ req115, item, action }) {
     const file = this.normalizeFile(item);
-    return req115.rbDelete(action === "delf" ? [file.cid] : [file.fid], file.cid);
+    const videos = this.getBundleMembers(item);
+    return req115.rbDelete(action === "delf" ? [file.cid] : videos.map((video) => video.fid), file.cid);
   }
 
   static bindActions(root, options) {
@@ -359,10 +392,15 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
 
       const { req115 = window.Req115 || (typeof Req115 !== "undefined" ? Req115 : null), grant = window.Grant || (typeof Grant !== "undefined" ? Grant : null), details = {} } = options;
       if (!req115) return;
+      const itemNode = btn.closest(".zymatch-item");
+      let members = [];
+      try { members = JSON.parse(itemNode?.dataset.members || "[]"); } catch (_) {}
       const item = {
         fid: btn.dataset.fid,
         cid: btn.dataset.cid,
-        n: btn.dataset.n || btn.closest(".zymatch-item")?.querySelector(".x-match-name")?.textContent.trim(),
+        n: btn.dataset.n || itemNode?.querySelector(".x-match-name")?.textContent.trim(),
+        isVrBundle: itemNode?.dataset.vrBundle === "1",
+        members,
       };
       const action = btn.dataset.action;
       const oldText = btn.textContent;
