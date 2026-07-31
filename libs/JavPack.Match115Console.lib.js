@@ -315,8 +315,17 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
 
     // 仅把“*.cover.图片扩展名”视为已存在的封面；目标目录已有该封面时不再上传，避免重复封面文件。
     const { data: targetFiles = [] } = await req115.files(targetCid, { limit: 1150 }).catch(() => ({ data: [] }));
+    let coverError = "";
     if (details.cover && !this.hasCoverFile(targetFiles)) {
-      await this.uploadCover({ req115, cid: targetCid, details }).catch((err) => console.warn("[JavPackMatch115Console.handleCover]", err?.message));
+      try {
+        await this.uploadCover({ req115, cid: targetCid, details, strict: Boolean(item.isVrBundle) });
+      } catch (err) {
+        // Video archival has already completed.  Return this separately so
+        // the caller can refresh its real location without pretending that
+        // the cover was applied.
+        if (item.isVrBundle) coverError = err?.message || "封面上传失败";
+        else console.warn("[JavPackMatch115Console.handleCover]", err?.message);
+      }
     }
 
     // Only remove the original directory after every selected file has been
@@ -332,15 +341,20 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       }
     }
 
-    return targetCid;
+    return item.isVrBundle ? { cid: targetCid, coverError } : targetCid;
   }
 
-  static async uploadCover({ req115, cid, details }) {
+  static async uploadCover({ req115, cid, details, strict = false }) {
     if (!details.cover) throw new Error("未找到可用封面");
-    const coverRes = await req115.handleCover(details.cover, cid, this.getCoverFilename(details));
+    const filename = this.getCoverFilename(details);
+    const coverRes = await req115.handleCover(details.cover, cid, filename);
     const fileId = coverRes?.data?.file_id || coverRes?.data?.fileid || coverRes?.file_id || coverRes?.fileid;
     if (!fileId) throw new Error("封面上传失败");
-    await req115.filesEdit(cid, fileId);
+
+    const editRes = await req115.filesEdit(cid, fileId);
+    if (strict && editRes?.state === false) {
+      throw new Error(editRes?.error_msg || editRes?.error || "115未能设置目录封面");
+    }
     return fileId;
   }
 
@@ -424,9 +438,11 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         btn.style.opacity = "0.5";
       }
 
+      let archiveResult;
       try {
         if (action === "archive") {
-          const newCid = await this.archiveMatched({ req115, item, details, dir: btn.dataset.dir?.split("/") });
+          archiveResult = await this.archiveMatched({ req115, item, details, dir: btn.dataset.dir?.split("/") });
+          const newCid = archiveResult?.cid || archiveResult;
           item.cid = newCid;
           const itemDom = btn.closest(".zymatch-item");
           itemDom?.querySelectorAll("[data-cid]").forEach((node) => {
@@ -435,7 +451,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           const dirNode = itemDom?.querySelector(".x-match-dir");
           if (dirNode && btn.dataset.dir) dirNode.textContent = btn.dataset.dir;
           const coverBtn = itemDom?.querySelector('.x-match-cover');
-          if (coverBtn && details.cover) {
+          if (coverBtn && details.cover && !archiveResult?.coverError) {
             coverBtn.classList.remove("is-info");
             coverBtn.classList.add("is-success");
             coverBtn.textContent = "已有封面";
@@ -462,7 +478,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           grant?.notify?.({ status: "success", icon: "success", msg: "操作成功" });
           return;
         } else if (action === "cover") {
-          await this.uploadCover({ req115, cid: item.cid, details });
+          await this.uploadCover({ req115, cid: item.cid, details, strict: item.isVrBundle });
           btn.classList.remove("is-info");
           btn.classList.add("is-success");
           btn.textContent = "已有封面";
@@ -485,7 +501,10 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           }
         }
 
-        grant?.notify?.({ status: "success", icon: "success", msg: "操作成功" });
+        const archiveCoverError = action === "archive" ? archiveResult?.coverError : "";
+        grant?.notify?.(archiveCoverError
+          ? { status: "warn", icon: "warning", msg: `已归档，封面未上传：${archiveCoverError}` }
+          : { status: "success", icon: "success", msg: "操作成功" });
         if (action === "archive") {
           btn.textContent = "已归档";
           btn.setAttribute("disabled", "");
