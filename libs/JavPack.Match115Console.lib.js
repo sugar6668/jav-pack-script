@@ -271,12 +271,12 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         </a>
         <div class="buttons">
           <div class="x-match-archive-dropdown">
-            <button class="button is-small is-primary x-match-action x-match-archive-main" title="${safeActorPreview}" data-action="archive" data-archive-mode="actor" data-dir="${safeActorDir}" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">刮削归档</button>
+            <button class="button is-small is-primary x-match-action x-match-archive-main" title="${safeActorPreview}" data-action="archive" data-archive-mode="actor" data-dir="${safeActorDir}" data-default-dir="${safeActorDir}" data-default-title="${safeActorPreview}" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">刮削归档</button>
             <button class="button is-small is-primary x-match-archive-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="选择归档方式">
               <svg class="x-match-archive-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
             </button>
             <div class="x-match-archive-menu" role="menu">
-              <button class="button is-small is-primary x-match-action x-match-archive-code" title="${safeCodePreview}" data-action="archive" data-archive-mode="code" data-dir="${safeCodeDir}" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">按番号归档</button>
+              <button class="button is-small is-primary x-match-action x-match-archive-code" title="${safeCodePreview}" data-action="archive" data-archive-mode="code" data-dir="${safeCodeDir}" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">番号归档</button>
             </div>
           </div>
           <button class="button is-small is-link x-match-action" title="${safeRenamePreview}" data-action="rename" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">重命名</button>
@@ -397,37 +397,53 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         return;
       }
 
-      const btn = e.target.closest(".x-match-action");
-      if (!btn || !root.contains(btn)) return;
+      const actionBtn = e.target.closest(".x-match-action");
+      if (!actionBtn || !root.contains(actionBtn)) return;
 
       e.preventDefault();
       e.stopPropagation();
-      if (btn.dataset.busy === "1") return;
 
       const { req115 = window.Req115 || (typeof Req115 !== "undefined" ? Req115 : null), grant = window.Grant || (typeof Grant !== "undefined" ? Grant : null), details = {} } = options;
       if (!req115) return;
-      const itemNode = btn.closest(".zymatch-item");
+      const itemNode = actionBtn.closest(".zymatch-item");
       let members = [];
       try { members = JSON.parse(itemNode?.dataset.members || "[]"); } catch (_) {}
       const item = {
-        fid: btn.dataset.fid,
-        cid: btn.dataset.cid,
-        n: btn.dataset.n || itemNode?.querySelector(".x-match-name")?.textContent.trim(),
+        fid: actionBtn.dataset.fid,
+        cid: actionBtn.dataset.cid,
+        n: actionBtn.dataset.n || itemNode?.querySelector(".x-match-name")?.textContent.trim(),
         isVrBundle: itemNode?.dataset.vrBundle === "1",
         members,
       };
-      const action = btn.dataset.action;
+      const action = actionBtn.dataset.action;
+      const dropdown = actionBtn.closest(".x-match-archive-dropdown");
+      const archiveMain = dropdown?.querySelector(".x-match-archive-main");
+
+      // The code-mode action lives inside a menu that closes immediately. Promote
+      // the selected mode to the visible split-button so its spinner remains
+      // observable; the default actor mode is restored after the operation.
+      if (action === "archive" && actionBtn.classList.contains("x-match-archive-code") && archiveMain) {
+        ["archiveMode", "dir"].forEach((key) => {
+          archiveMain.dataset[key] = actionBtn.dataset[key] || "";
+        });
+        archiveMain.title = actionBtn.title;
+        archiveMain.textContent = "番号归档";
+      }
+
+      const btn = action === "archive" && archiveMain ? archiveMain : actionBtn;
+      const busyTarget = action === "archive" && dropdown ? dropdown : btn;
+      if (busyTarget.dataset.busy === "1") return;
       const oldText = btn.textContent;
       const restoreText = action === "rename" ? "重命名" : oldText;
       const useSpinner = action === "archive";
 
-      const dropdown = btn.closest(".x-match-archive-dropdown");
       dropdown?.classList.remove("is-active");
       dropdown?.querySelector(".x-match-archive-toggle")?.setAttribute("aria-expanded", "false");
 
-      btn.dataset.busy = "1";
+      busyTarget.dataset.busy = "1";
       if (useSpinner) {
         btn.classList.add("is-loading");
+        dropdown?.querySelectorAll(".x-match-archive-toggle, .x-match-archive-code").forEach((node) => node.setAttribute("disabled", ""));
       } else if (action === "rename") {
         // Rename updates the row in-place.  Keep its label stable so a later
         // render or a detached old button can never leave the visible control
@@ -505,10 +521,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         grant?.notify?.(archiveCoverError
           ? { status: "warn", icon: "warning", msg: `已归档，封面未上传：${archiveCoverError}` }
           : { status: "success", icon: "success", msg: "操作成功" });
-        if (action === "archive") {
-          btn.textContent = "已归档";
-          btn.setAttribute("disabled", "");
-        } else if (action === "delv" || action === "delf") {
+        if (action === "delv" || action === "delf") {
           btn.textContent = "已删除";
           btn.setAttribute("disabled", "");
         }
@@ -516,9 +529,19 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         grant?.notify?.({ status: "error", icon: "error", msg: err?.message || "操作失败" });
         btn.textContent = restoreText;
       } finally {
-        if (useSpinner) btn.classList.remove("is-loading");
+        if (useSpinner) {
+          btn.classList.remove("is-loading");
+          if (archiveMain) {
+            archiveMain.dataset.archiveMode = "actor";
+            archiveMain.dataset.dir = archiveMain.dataset.defaultDir || "";
+            archiveMain.title = archiveMain.dataset.defaultTitle || "";
+            archiveMain.textContent = "刮削归档";
+            archiveMain.removeAttribute("disabled");
+          }
+          dropdown?.querySelectorAll(".x-match-archive-toggle, .x-match-archive-code").forEach((node) => node.removeAttribute("disabled"));
+        }
         btn.style.opacity = "1";
-        delete btn.dataset.busy;
+        delete busyTarget.dataset.busy;
         if (action === "rename") btn.textContent = restoreText;
       }
     }, true);
