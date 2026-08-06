@@ -181,8 +181,14 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     const cids = [...new Set(items
       .filter((item) => item?.cid && (!item.realPath || !item.paths?.length || item.hasCover === undefined || item.subtitleDetectionVersion !== this.subtitleDetectionVersion))
       .map((item) => item.cid))];
-    const entries = await Promise.all(cids.map(async (cid) => [cid, await this.resolveMetadata(req115, cid).catch(() => ({ realPath: "", hasCover: false, subtitleFiles: [] }))]));
-    const metadata = new Map(entries);
+    const metadata = new Map();
+    // Metadata requests used to fan out with Promise.all.  A fresh card may
+    // contain several folders, so resolve them one by one instead.
+    for (const cid of cids) {
+      const metadataItem = await this.resolveMetadata(req115, cid)
+        .catch(() => ({ realPath: "", hasCover: false, subtitleFiles: [] }));
+      metadata.set(cid, metadataItem);
+    }
 
     for (const item of items) {
       const meta = metadata.get(item.cid);
@@ -234,6 +240,15 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     const tags = [hasZh && "[中文]", hasCrack && "[破解]", hasLeak && "[流出]", isUncensored && "[无码]"].filter(Boolean).join("");
     // 标签统一位于番号和作品名之间，例如：LUXU-123 [中文][破解][流出][无码] 作品名。
     return [code, tags, title].filter(Boolean).join(" ");
+  }
+
+  static buildRenamedFiles(files = [], rename = "") {
+    const sorted = [...files].sort((a, b) => String(a.n || "").localeCompare(String(b.n || "")));
+    const names = new Map(sorted.map((file, index) => [
+      String(file.fid),
+      `${rename}${sorted.length > 1 ? `.${String(index + 1).padStart(2, "0")}` : ""}.${file.ico}`,
+    ]));
+    return files.map((file) => ({ ...file, n: names.get(String(file.fid)) || file.n }));
   }
 
   static buildPreview(details = {}, file = {}, mode = "rename") {
@@ -320,8 +335,10 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       if (!moveRes || moveRes.state === false) throw this.requestError("文件移动失败", moveRes);
     }
 
+    const rename = this.buildRename(details, files);
+    const renamedFiles = this.buildRenamedFiles(files, rename);
     await req115.handleRename(files, targetCid, {
-      rename: this.buildRename(details, files),
+      rename,
       renameTxt: { zh: " [中文]", crack: "", no: ".${no}", sep: "-" },
       zh: false,
       crack: false,
@@ -364,7 +381,9 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       sourceCid: file.cid,
       cid: targetCid,
       realPath: targetDir.join("/"),
-      files: targetFiles.filter((target) => files.some((source) => String(source.fid) === String(target.fid))),
+      // The move/rename result is known locally.  Do not wait for the listing
+      // index to catch up before synchronizing the small window and its card.
+      files: renamedFiles,
       hasCover,
     };
 
@@ -512,6 +531,12 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           });
           const dirNode = itemDom?.querySelector(".x-match-dir");
           if (dirNode && btn.dataset.dir) dirNode.textContent = btn.dataset.dir;
+          const renamed = item.archiveSync?.files?.find((file) => String(file.fid) === String(item.fid));
+          if (renamed?.n) {
+            const nameNode = itemDom?.querySelector(".x-match-name");
+            if (nameNode) nameNode.textContent = renamed.n;
+            itemDom?.querySelectorAll("[data-n]").forEach((node) => { node.dataset.n = renamed.n; });
+          }
           const coverBtn = itemDom?.querySelector('.x-match-cover');
           if (coverBtn && item.archiveSync?.hasCover) {
             coverBtn.classList.remove("is-info");

@@ -190,28 +190,42 @@ class Req115 extends Drive115 {
     }
   }
 
+  static isMatchSearchRequest(config) {
+    if (!this.is115Request(config)) return false;
+    const url = typeof config === "string" ? config : config?.url;
+    const params = typeof config === "object" ? config?.params : null;
+    try {
+      return new URL(url, location.origin).pathname === "/files/search" && Number(params?.type) === 4;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static getRequestCoordinator() {
     const root = this.getMutationRoot();
     let coordinator = root[this.REQUEST_COORDINATOR_KEY];
     if (coordinator) return coordinator;
 
-    coordinator = { queue: [], running: false, paused: null, lastFinishedAt: 0, drain: null };
+    coordinator = { queue: [], current: null, running: false, paused: null, lastFinishedAt: 0, drain: null };
     coordinator.drain = async () => {
       if (coordinator.running || coordinator.paused || !coordinator.queue.length) return;
       coordinator.running = true;
       const entry = coordinator.queue.shift();
+      coordinator.current = entry;
       try {
         const wait = Math.max(0, coordinator.lastFinishedAt + this.REQUEST_GAP - Date.now());
         if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
         if (coordinator.paused) {
-          coordinator.queue.unshift(entry);
+          if (!entry.cancelled) coordinator.queue.unshift(entry);
           return;
         }
+        entry.started = true;
         entry.resolve(await entry.task());
       } catch (err) {
         entry.reject(err);
       } finally {
         coordinator.running = false;
+        if (coordinator.current === entry) coordinator.current = null;
         coordinator.lastFinishedAt = Date.now();
         if (!coordinator.paused && coordinator.queue.length) coordinator.drain();
       }
@@ -222,6 +236,7 @@ class Req115 extends Drive115 {
 
   static queue115Request(task) {
     const coordinator = this.getRequestCoordinator();
+    if (coordinator.paused) return Promise.reject(new Error(coordinator.paused.reason));
     return new Promise((resolve, reject) => {
       coordinator.queue.push({ task, resolve, reject });
       coordinator.drain();
@@ -232,6 +247,12 @@ class Req115 extends Drive115 {
     const coordinator = this.getRequestCoordinator();
     if (coordinator.paused) return;
     coordinator.paused = { reason, at: Date.now() };
+    const error = new Error(reason);
+    if (coordinator.current && !coordinator.current.started) {
+      coordinator.current.cancelled = true;
+      coordinator.current.reject(error);
+    }
+    coordinator.queue.splice(0).forEach((entry) => entry.reject(error));
     // A risk response from a read endpoint must also stop queued write work.
     // Recovery remains tied to the existing successful verification path.
     this.pauseMutations(reason);
@@ -251,11 +272,15 @@ class Req115 extends Drive115 {
 
   static request(config) {
     if (!this.is115Request(config)) return super.request(config);
-    return this.queue115Request(async () => {
+    const execute = async () => {
       const response = await super.request(config);
       if (this.isRiskResponse(response)) this.pauseRequests(response.error_msg || response.message || "115 需要安全验证");
       return response;
-    });
+    };
+    // Page matching is the only automatic high-fan-out path.  Keep that search
+    // serialized at two seconds; archive/offline internals already run in the
+    // mutation queue and should not inherit a delay for every API step.
+    return this.isMatchSearchRequest(config) ? this.queue115Request(execute) : execute();
   }
 
   static getMutationCoordinator() {
