@@ -653,6 +653,10 @@ class Req115 extends Drive115 {
       const srts = srtRes?.data || [];
       const files = [...bundleVideos, ...srts];
       let syncedVideos = bundleVideos;
+      const pathParts = (srtRes?.path || [])
+        .map((part) => part?.name || part?.file_name || part?.n)
+        .filter((name) => name && name !== "网盘" && name !== "115");
+      let finalFolder = "";
 
       if (clean) await this.handleClean(files, file_id);
 
@@ -669,6 +673,15 @@ class Req115 extends Drive115 {
         });
         await this.filesBatchRename(renameObj);
         syncedVideos = bundleVideos.map((file) => ({ ...file, n: renameObj[file.fid] || file.n }));
+        finalFolder = renameObj[file_id] || "";
+      }
+
+      // The directory response above was obtained before the task-folder
+      // rename.  Replace its leaf locally so the immediate cache mirrors the
+      // scraped folder instead of the magnet task name.
+      if (finalFolder) {
+        if (pathParts.length) pathParts[pathParts.length - 1] = finalFolder;
+        else pathParts.push("根目录", ...dir, finalFolder);
       }
 
       let hasCover = false;
@@ -689,10 +702,7 @@ class Req115 extends Drive115 {
       res.match = {
         cid: file_id,
         files: syncedVideos.map((file) => ({ ...file, cid: file_id })),
-        realPath: (srtRes?.path || [])
-          .map((part) => part?.name || part?.file_name || part?.n)
-          .filter((name) => name && name !== "网盘" && name !== "115")
-          .join("/"),
+        realPath: pathParts.join("/"),
         hasCover,
         subtitleFiles: srts,
       };
