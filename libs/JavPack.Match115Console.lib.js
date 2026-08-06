@@ -532,7 +532,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
             node.dataset.cid = String(newCid);
           });
           const dirNode = itemDom?.querySelector(".x-match-dir");
-          if (dirNode && btn.dataset.dir) dirNode.textContent = btn.dataset.dir;
+          if (dirNode) dirNode.textContent = item.archiveSync?.realPath || btn.dataset.dir || "";
           const renamed = item.archiveSync?.files?.find((file) => String(file.fid) === String(item.fid));
           if (renamed?.n) {
             const nameNode = itemDom?.querySelector(".x-match-name");
