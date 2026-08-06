@@ -16,7 +16,7 @@
   if (!window.JavPackQuickView) return;
 
   const quickView = new window.JavPackQuickView();
-  const syncedDeletes = new Map();
+  const syncedMutations = new Map();
   const ensure = () => quickView.ensureButtons(document);
   const getCode = (card) => card?.querySelector(".video-title strong")?.textContent.trim().toUpperCase();
 
@@ -38,7 +38,7 @@
   }).observe(document.body, { childList: true, subtree: true });
   window.addEventListener("JavDB_MatchCacheSynced", ({ detail }) => {
     const code = String(detail?.code || "").trim().toUpperCase();
-    if (code) syncedDeletes.set(code, Date.now());
+    if (code) syncedMutations.set(code, { at: Date.now(), operation: detail?.operation || "sync" });
   });
   window.addEventListener("JavDB_QuickView_Closed", ({ detail }) => {
     const card = detail?.card;
@@ -46,12 +46,12 @@
     if (!matchNode) return;
 
     const code = getCode(card);
-    const syncedAt = syncedDeletes.get(code);
-    // Deletion already supplied an exact cache snapshot to the source card;
-    // avoid a stale 115 index response.  All other operations, especially
-    // subtitle upload, retain the established close -> reMatch flow.
-    if (syncedAt && Date.now() - syncedAt < 10 * 1000) {
-      syncedDeletes.delete(code);
+    const synced = syncedMutations.get(code);
+    // Archive, rename, cover, and delete now send an exact MatchCache snapshot
+    // before this iframe is removed.  Reuse it instead of immediately querying
+    // 115 again; if no sync arrives, retain the ordinary close -> reMatch path.
+    if (synced && Date.now() - synced.at < 10 * 1000) {
+      syncedMutations.delete(code);
       return;
     }
     setTimeout(() => unsafeWindow.reMatch?.(matchNode), 400);

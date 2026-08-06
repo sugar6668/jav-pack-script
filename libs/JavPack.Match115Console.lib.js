@@ -22,6 +22,13 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     return String(value).replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, " ").trim();
   }
 
+  static requestError(message, response = {}) {
+    const err = new Error(response?.error_msg || response?.error || message);
+    err.errcode = response?.errcode;
+    err.response = response;
+    return err;
+  }
+
   static getExt(name = "") {
     const ext = String(name).split(".").pop();
     return ext && ext !== name ? ext.toLowerCase() : "mp4";
@@ -291,7 +298,11 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     `;
   }
 
-  static async archiveMatched({ req115, item, details, dir }) {
+  static archiveMatched({ req115, queueOptions, ...args }) {
+    return req115.queueMutation("归档", () => this.archiveMatchedNow({ req115, ...args }), queueOptions);
+  }
+
+  static async archiveMatchedNow({ req115, item, details, dir }) {
     const file = this.normalizeFile(item);
     const videos = this.getBundleMembers(item);
     const targetDir = (dir?.length ? dir : this.buildTargetDir(details)).map((part) => this.sanitizeName(part)).filter(Boolean);
@@ -306,7 +317,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
 
     if (String(file.cid) !== String(targetCid)) {
       const moveRes = await req115.filesMove(files.map((it) => it.fid), targetCid);
-      if (!moveRes || moveRes.state === false) throw new Error("文件移动失败");
+      if (!moveRes || moveRes.state === false) throw this.requestError("文件移动失败", moveRes);
     }
 
     await req115.handleRename(files, targetCid, {
@@ -319,9 +330,11 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     // 仅把“*.cover.图片扩展名”视为已存在的封面；目标目录已有该封面时不再上传，避免重复封面文件。
     const { data: targetFiles = [] } = await req115.files(targetCid, { limit: 1150 }).catch(() => ({ data: [] }));
     let coverError = "";
-    if (details.cover && !this.hasCoverFile(targetFiles)) {
+    let hasCover = this.hasCoverFile(targetFiles);
+    if (details.cover && !hasCover) {
       try {
-        await this.uploadCover({ req115, cid: targetCid, details, strict: Boolean(item.isVrBundle) });
+        await this.uploadCoverNow({ req115, cid: targetCid, details, strict: Boolean(item.isVrBundle) });
+        hasCover = true;
       } catch (err) {
         // Video archival has already completed.  Return this separately so
         // the caller can refresh its real location without pretending that
@@ -340,14 +353,29 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       const sourceCount = Number(sourceRes?.count);
       if (Number.isFinite(sourceCount) && sourceCount === 0) {
         const deleteRes = await req115.rbDelete([file.cid]);
-        if (!deleteRes || deleteRes.state === false) throw new Error("源文件夹清理失败");
+        if (!deleteRes || deleteRes.state === false) throw this.requestError("源文件夹清理失败", deleteRes);
       }
     }
+
+    // The destination listing is already available from the archive flow.
+    // Keep an exact delta on the item so Quick View can update the parent card
+    // without sending a second 115 search after it closes.
+    item.archiveSync = {
+      sourceCid: file.cid,
+      cid: targetCid,
+      realPath: targetDir.join("/"),
+      files: targetFiles.filter((target) => files.some((source) => String(source.fid) === String(target.fid))),
+      hasCover,
+    };
 
     return item.isVrBundle ? { cid: targetCid, coverError } : targetCid;
   }
 
-  static async uploadCover({ req115, cid, details, strict = false }) {
+  static uploadCover({ req115, queueOptions, ...args }) {
+    return req115.queueMutation("设置封面", () => this.uploadCoverNow({ req115, ...args }), queueOptions);
+  }
+
+  static async uploadCoverNow({ req115, cid, details, strict = false }) {
     if (!details.cover) throw new Error("未找到可用封面");
     const filename = this.getCoverFilename(details);
     const coverRes = await req115.handleCover(details.cover, cid, filename);
@@ -361,7 +389,11 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     return fileId;
   }
 
-  static async renameMatched({ req115, item, details }) {
+  static renameMatched({ req115, queueOptions, ...args }) {
+    return req115.queueMutation("重命名", () => this.renameMatchedNow({ req115, ...args }), queueOptions);
+  }
+
+  static async renameMatchedNow({ req115, item, details }) {
     const file = this.normalizeFile(item);
     const videos = this.getBundleMembers(item);
     const { data: srts = [] } = await req115.filesAllSRTs(file.cid).catch(() => ({ data: [] }));
@@ -379,7 +411,11 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     return { file, rename };
   }
 
-  static async deleteMatched({ req115, item, action }) {
+  static deleteMatched({ req115, queueOptions, ...args }) {
+    return req115.queueMutation(args.action === "delf" ? "删除文件夹" : "删除文件", () => this.deleteMatchedNow({ req115, ...args }), queueOptions);
+  }
+
+  static async deleteMatchedNow({ req115, item, action }) {
     const file = this.normalizeFile(item);
     const videos = this.getBundleMembers(item);
     return req115.rbDelete(action === "delf" ? [file.cid] : videos.map((video) => video.fid), file.cid);
@@ -408,6 +444,9 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
 
       const { req115 = window.Req115 || (typeof Req115 !== "undefined" ? Req115 : null), grant = window.Grant || (typeof Grant !== "undefined" ? Grant : null), details = {} } = options;
       if (!req115) return;
+      // A later explicit action is the user's confirmation that the account is
+      // usable again.  Resume retained work instead of silently retrying it.
+      if (req115.getMutationState?.().paused) req115.resumeMutations();
       const itemNode = actionBtn.closest(".zymatch-item");
       let members = [];
       try { members = JSON.parse(itemNode?.dataset.members || "[]"); } catch (_) {}
@@ -457,10 +496,17 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         btn.style.opacity = "0.5";
       }
 
+      const queueOptions = {
+        onState: ({ state, queued }) => {
+          btn.dataset.queueState = state;
+          if (state === "queued") btn.textContent = `排队中${queued ? ` (${queued})` : ""}`;
+          if (state === "running" && !useSpinner) btn.textContent = "执行中..";
+        },
+      };
       let archiveResult;
       try {
         if (action === "archive") {
-          archiveResult = await this.archiveMatched({ req115, item, details, dir: btn.dataset.dir?.split("/") });
+          archiveResult = await this.archiveMatched({ req115, item, details, dir: btn.dataset.dir?.split("/"), queueOptions });
           const newCid = archiveResult?.cid || archiveResult;
           item.cid = newCid;
           const itemDom = btn.closest(".zymatch-item");
@@ -470,17 +516,16 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           const dirNode = itemDom?.querySelector(".x-match-dir");
           if (dirNode && btn.dataset.dir) dirNode.textContent = btn.dataset.dir;
           const coverBtn = itemDom?.querySelector('.x-match-cover');
-          if (coverBtn && details.cover && !archiveResult?.coverError) {
+          if (coverBtn && item.archiveSync?.hasCover) {
             coverBtn.classList.remove("is-info");
             coverBtn.classList.add("is-success");
             coverBtn.textContent = "已有封面";
             coverBtn.setAttribute("disabled", "");
           }
-          // 归档改变了文件夹和文件名；旧匹配缓存会让页面刷新后仍显示归档前的信息。
-          options.invalidateCache?.();
-          await options.refresh?.().catch((err) => console.warn("[JavPackMatch115Console.refresh]", err?.message));
+          const cache = options.updateCache?.("archive", item, item.archiveSync);
+          options.syncCache?.("archive", cache);
         } else if (action === "rename") {
-          const { file, rename } = await this.renameMatched({ req115, item, details });
+          const { file, rename } = await this.renameMatched({ req115, item, details, queueOptions });
           const itemDom = btn.closest(".zymatch-item");
           const renamedVideo = `${rename}.${file.ico}`;
           const nameNode = itemDom?.querySelector(".x-match-name");
@@ -492,24 +537,26 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           });
           const matchNode = itemDom?.querySelector(".x-match");
           if (matchNode) matchNode.title = this.formatItemTip({ ...file, n: renamedVideo }, dirNode?.textContent);
-          options.invalidateCache?.();
-          await options.refresh?.().catch((err) => console.warn("[JavPackMatch115Console.refresh]", err?.message));
+          const cache = options.updateCache?.("rename", item, { rename, file });
+          options.syncCache?.("rename", cache);
           grant?.notify?.({ status: "success", icon: "success", msg: "操作成功" });
           return;
         } else if (action === "cover") {
-          await this.uploadCover({ req115, cid: item.cid, details, strict: item.isVrBundle });
+          await this.uploadCover({ req115, cid: item.cid, details, strict: item.isVrBundle, queueOptions });
           btn.classList.remove("is-info");
           btn.classList.add("is-success");
           btn.textContent = "已有封面";
           btn.setAttribute("disabled", "");
+          const cache = options.updateCache?.("cover", item, { hasCover: true });
+          options.syncCache?.("cover", cache);
         } else if (action === "delv" || action === "delf") {
-          await this.deleteMatched({ req115, item, action });
+          await this.deleteMatched({ req115, item, action, queueOptions });
           const cache = options.removeFromCache?.(item, action);
           // Detail views run in the quick-view iframe.  Send the exact
           // post-delete cache snapshot back to the source card instead of
           // waiting for a new 115 search (which can briefly return deleted
           // files while indexing catches up).
-          options.syncCache?.(cache);
+          options.syncCache?.("delete", cache);
           if (action === "delf") {
             // 删除文件夹会同时删除该目录下的所有匹配项；同步移除整组行，避免只消失当前行而显示旧结果。
             root.querySelectorAll(".zymatch-item").forEach((node) => {
@@ -545,6 +592,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         }
         btn.style.opacity = "1";
         delete busyTarget.dataset.busy;
+        delete btn.dataset.queueState;
         if (action === "rename") btn.textContent = restoreText;
       }
     }, true);

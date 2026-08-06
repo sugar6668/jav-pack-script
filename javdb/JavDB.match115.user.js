@@ -367,6 +367,35 @@ const getPageDetails = (dom = document) => {
     // BroadcastChannel delivery can otherwise race with iframe removal.
     if (window.parent !== window) window.parent.postMessage(payload, location.origin);
   };
+  const updateMatchCache = (operation, item, changes = {}) => {
+    const cache = MatchCache.get(code) || [];
+    const fids = new Set([item?.fid, ...(item?.members || []).map((member) => member?.fid)]
+      .filter(Boolean)
+      .map(String));
+    const targetFiles = new Map((changes.files || []).map((file) => [String(file.fid), file]));
+    const next = cache.map((source) => {
+      if (!fids.has(String(source.fid))) return source;
+      const target = targetFiles.get(String(source.fid));
+      const updated = { ...source };
+
+      if (operation === "archive") {
+        updated.cid = changes.cid || source.cid;
+        updated.realPath = changes.realPath || source.realPath;
+        updated.hasCover = Boolean(changes.hasCover ?? source.hasCover);
+        ["n", "s", "ico", "pc"].forEach((key) => {
+          if (target?.[key] !== undefined) updated[key] = target[key];
+        });
+      } else if (operation === "rename" && String(source.fid) === String(item.fid)) {
+        const ext = changes.file?.ico || source.ico;
+        if (changes.rename && ext) updated.n = `${changes.rename}.${ext}`;
+      } else if (operation === "cover") {
+        updated.hasCover = Boolean(changes.hasCover);
+      }
+      return updated;
+    });
+    MatchCache.set(code, next);
+    return next;
+  };
   const matcher = (force = false) => {
     const cache = force ? null : MatchCache.get(code);
     if (cache !== null) {
@@ -415,9 +444,8 @@ const getPageDetails = (dom = document) => {
       MatchCache.set(code, next);
       return next;
     },
-    syncCache: (data) => syncQuickViewState("delete", data),
-    invalidateCache: () => MatchCache.del(code),
-    refresh: () => matcher(true),
+    updateCache: (operation, item, changes) => updateMatchCache(operation, item, changes),
+    syncCache: (operation, data) => syncQuickViewState(operation, data),
   });
   window.addEventListener("JavDB_SubtitleUploaded", ({ detail }) => {
     if (detail?.code && String(detail.code).trim().toUpperCase() !== String(code).trim().toUpperCase()) return;
@@ -600,7 +628,7 @@ const getPageDetails = (dom = document) => {
       match();
     };
 
-    const dispatch = (node, force = false) => {
+    const dispatch = (node, force = false, cacheOnly = false) => {
       if (force) {
         delete node.dataset.matchPending;
         delete node.dataset.matchResolved;
@@ -614,6 +642,7 @@ const getPageDetails = (dom = document) => {
       const { code, prefix, searchKey } = details;
       const cache = MatchCache.get(code) ?? MatchCache.get(prefix);
       if (cache !== null) {
+        if (cacheOnly) return after?.(details, cache);
         return enrichMetadata(cache, details)
           .then((sources) => {
             MatchCache.set(code, sources);
@@ -637,15 +666,15 @@ const getPageDetails = (dom = document) => {
     };
 
     const obs = new IntersectionObserver(callback, { threshold: 0.25 });
-    return (nodeList, { force = false } = {}) => nodeList.forEach((node) => {
+    return (nodeList, { force = false, cacheOnly = false } = {}) => nodeList.forEach((node) => {
       // A forced refresh commonly comes from Quick View closing.  The card is
       // already in the viewport and has been unobserved, so it must bypass
       // IntersectionObserver and enter the queue directly.
-      if (force) return requestAnimationFrame(() => dispatch(node, true));
+      if (force) return requestAnimationFrame(() => dispatch(node, true, cacheOnly));
       // Matched-only actor mode hides unmatched cards, so they never intersect.
       // Queue them immediately to resolve their match state before CSS decides visibility.
       if (document.documentElement.classList.contains("x-actor-matched-only")) {
-        requestAnimationFrame(() => dispatch(node, force));
+        requestAnimationFrame(() => dispatch(node, force, cacheOnly));
       } else {
         obs.observe(node);
       }
@@ -681,11 +710,11 @@ const getPageDetails = (dom = document) => {
     }
     if (payload.type === "sync" && Array.isArray(payload.data)) {
       MatchCache.set(payload.code, payload.data);
-      // Let QuickView distinguish a delete-cache sync from normal operations
-      // such as subtitle upload, which still need a close-triggered re-match.
-      window.dispatchEvent(new CustomEvent("JavDB_MatchCacheSynced", { detail: { code: payload.code } }));
+      // The parent receives an exact post-mutation snapshot before the Quick
+      // View frame disappears, so it can repaint without querying 115 again.
+      window.dispatchEvent(new CustomEvent("JavDB_MatchCacheSynced", { detail: { code: payload.code, operation: payload.operation } }));
     }
-    matchQueue(document.querySelectorAll(`.${parseCodeCls(payload.code)}`), { force: true });
+    matchQueue(document.querySelectorAll(`.${parseCodeCls(payload.code)}`), { force: true, cacheOnly: payload.type === "sync" });
   };
   CHANNEL.onmessage = ({ data }) => receiveMatchState(data);
   window.addEventListener("message", ({ data, origin }) => {

@@ -477,7 +477,11 @@ window.JavPackSubtitle = class JavPackSubtitle {
     URL.revokeObjectURL(link.href);
   }
 
-  static async uploadSubtitle({ req115, cid, filename, buffer }) {
+  static uploadSubtitle(args) {
+    return args.req115.queueMutation("上传字幕", () => this.uploadSubtitleNow(args));
+  }
+
+  static async uploadSubtitleNow({ req115, cid, filename, buffer }) {
     const blob = new Blob([buffer], { type: "application/octet-stream" });
     const file = new File([blob], filename, { type: "application/octet-stream" });
     const initRes = await req115.sampleInitUpload({ filename, filesize: file.size, cid });

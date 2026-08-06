@@ -167,6 +167,136 @@ class Drive115 extends Req {
 
 // eslint-disable-next-line no-unused-vars, unused-imports/no-unused-vars
 class Req115 extends Drive115 {
+  static MUTATION_GAP = 2000;
+  static MUTATION_COORDINATOR_KEY = "__JavPack115MutationCoordinatorV1";
+
+  static getMutationRoot() {
+    try {
+      if (typeof unsafeWindow !== "undefined" && unsafeWindow.top) return unsafeWindow.top;
+      if (typeof window !== "undefined" && window.top) return window.top;
+    } catch (_) {}
+    return globalThis;
+  }
+
+  static getMutationCoordinator() {
+    const root = this.getMutationRoot();
+    let coordinator = root[this.MUTATION_COORDINATOR_KEY];
+    if (coordinator) return coordinator;
+
+    coordinator = {
+      queue: [],
+      running: false,
+      draining: false,
+      paused: null,
+      lastFinishedAt: 0,
+      gap: this.MUTATION_GAP,
+      drain: null,
+    };
+
+    const emit = (entry, state) => {
+      const detail = {
+        state,
+        label: entry?.label || "",
+        queued: coordinator.queue.length,
+        running: coordinator.running,
+        paused: coordinator.paused,
+      };
+      entry?.onState?.(detail);
+      try { root.dispatchEvent(new CustomEvent("JavPack115MutationState", { detail })); } catch (_) {}
+    };
+
+    coordinator.drain = async () => {
+      if (coordinator.running || coordinator.draining || coordinator.paused || !coordinator.queue.length) return;
+      coordinator.draining = true;
+      const entry = coordinator.queue.shift();
+      try {
+        const wait = Math.max(0, coordinator.lastFinishedAt + coordinator.gap - Date.now());
+        if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+        if (coordinator.paused) {
+          coordinator.queue.unshift(entry);
+          emit(entry, "paused");
+          return;
+        }
+
+        coordinator.running = true;
+        emit(entry, "running");
+        try {
+          entry.resolve(await entry.task());
+        } catch (err) {
+          entry.onError?.(err);
+          entry.reject(err);
+        }
+      } finally {
+        coordinator.running = false;
+        coordinator.draining = false;
+        coordinator.lastFinishedAt = Date.now();
+        emit(entry, coordinator.paused ? "paused" : "finished");
+        if (!coordinator.paused && coordinator.queue.length) setTimeout(coordinator.drain, coordinator.gap);
+      }
+    };
+
+    root[this.MUTATION_COORDINATOR_KEY] = coordinator;
+    root.JavPack115Mutation = {
+      getState: () => ({ queued: coordinator.queue.length, running: coordinator.running, paused: coordinator.paused }),
+      resume: () => this.resumeMutations(),
+      cancelPending: () => this.cancelPendingMutations(),
+    };
+    return coordinator;
+  }
+
+  static queueMutation(label, task, { onState } = {}) {
+    const coordinator = this.getMutationCoordinator();
+    return new Promise((resolve, reject) => {
+      const entry = {
+        label,
+        task,
+        resolve,
+        reject,
+        onState,
+        onError: (err) => this.reportMutationError(err),
+      };
+      coordinator.queue.push(entry);
+      onState?.({ state: coordinator.paused ? "paused" : "queued", label, queued: coordinator.queue.length, running: coordinator.running, paused: coordinator.paused });
+      coordinator.drain();
+    });
+  }
+
+  static pauseMutations(reason = "115 操作需要确认") {
+    const coordinator = this.getMutationCoordinator();
+    if (coordinator.paused) return;
+    coordinator.paused = { reason, at: Date.now() };
+    try {
+      window.Grant?.notify?.({ status: "warn", icon: "warning", msg: `115 操作已暂停：${reason}` });
+    } catch (_) {}
+  }
+
+  static resumeMutations() {
+    const coordinator = this.getMutationCoordinator();
+    coordinator.paused = null;
+    coordinator.drain();
+  }
+
+  static getMutationState() {
+    const coordinator = this.getMutationCoordinator();
+    return { queued: coordinator.queue.length, running: coordinator.running, paused: coordinator.paused };
+  }
+
+  static cancelPendingMutations(reason = "已取消排队操作") {
+    const coordinator = this.getMutationCoordinator();
+    const error = new Error(reason);
+    coordinator.queue.splice(0).forEach((entry) => entry.reject(error));
+  }
+
+  static isRiskError(err) {
+    const code = Number(err?.errcode ?? err?.code ?? err?.response?.errcode);
+    const message = String(err?.message || err?.error_msg || err?.response?.error_msg || "");
+    return code === 911 || /安全验证|风控|操作频繁|请求频繁|captcha|risk.?control/i.test(message);
+  }
+
+  static reportMutationError(err) {
+    if (this.isRiskError(err)) this.pauseMutations(err?.message || "115 需要安全验证");
+  }
+
   static async filesAll(cid, params = {}) {
     const res = await this.files(cid, params);
     // 🛡️ 防御补丁：如果 res 是空的，直接返回空数据格式
@@ -366,7 +496,11 @@ class Req115 extends Drive115 {
     if (res?.host) return this.upload({ ...res, filename, file });
   }
 
-  static async handleOffline(
+  static async handleOffline(options, magnets) {
+    return this.queueMutation("离线任务", () => this.handleOfflineNow(options, magnets));
+  }
+
+  static async handleOfflineNow(
     { dir, regex, codes, verifyOptions, code, rename, renameTxt, tags, clean, cover, isVR, uncensored },
     magnets,
   ) {
@@ -383,15 +517,18 @@ class Req115 extends Drive115 {
         res.status = "error";
         res.currIdx = index;
         if (errcode === 10008) continue;
-        if (errcode === 911) res.status = "warn";
+        if (errcode === 911) {
+          res.status = "warn";
+          this.pauseMutations(error_msg || "115 需要安全验证");
+        }
         break;
       }
 
       const { videos, allVideos = [], file_id } = await this.handleVerify(info_hash, { regex, codes }, verifyOptions);
 
       if (!videos.length) {
-        if (verifyOptions.clean) this.lixianTaskDel([info_hash]);
-        if (file_id && clean) this.rbDelete([file_id], cid);
+        if (verifyOptions.clean) await this.lixianTaskDel([info_hash]);
+        if (file_id && clean) await this.rbDelete([file_id], cid);
 
         res.msg = `${code} 离线验证失败`;
         res.status = "error";
@@ -407,9 +544,9 @@ class Req115 extends Drive115 {
 
       if (clean) await this.handleClean(files, file_id);
 
-      if (tags.length) this.handleTags(bundleVideos, tags);
+      if (tags.length) await this.handleTags(bundleVideos, tags);
 
-      if (rename) this.handleRename(files, file_id, {
+      if (rename) await this.handleRename(files, file_id, {
         rename,
         renameTxt,
         zh: zh || srts.length,
@@ -421,7 +558,7 @@ class Req115 extends Drive115 {
       if (cover) {
         try {
           const { data } = await this.handleCover(cover, file_id, `${code}.cover.jpg`);
-          if (data?.file_id) this.filesEdit(file_id, data.file_id);
+          if (data?.file_id) await this.filesEdit(file_id, data.file_id);
         } catch (err) {
           console.warn("[Req115.handleCover]", err?.message);
         }

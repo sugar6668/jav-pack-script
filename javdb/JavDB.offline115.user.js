@@ -409,6 +409,7 @@ const offline = async ({ options, magnets, onstart, onprogress, onfinally }, cur
     if (![VERIFIED, FAILED].includes(new_value)) return;
     GM_removeValueChangeListener(listener);
     if (new_value === FAILED) return onfinally?.();
+    Req115.resumeMutations();
     offline({ options, magnets, onstart, onprogress, onfinally }, res.currIdx);
   });
 };
@@ -483,6 +484,7 @@ const offline = async ({ options, magnets, onstart, onprogress, onfinally }, cur
 
     const action = findAction(target.dataset, actions);
     if (!action) return;
+    if (Req115.getMutationState?.().paused) Req115.resumeMutations();
 
     const inMagnets = target.closest("#magnets-content > .item");
     const { magnetOptions, ...options } = Offline.getOptions(action, details);
@@ -628,6 +630,7 @@ const offline = async ({ options, magnets, onstart, onprogress, onfinally }, cur
       const dom = await Req.request(target.closest("a").href);
       const details = getDetails(dom);
       if (!details) throw new Error("Not found details");
+      if (Req115.getMutationState?.().paused) Req115.resumeMutations();
 
       const UNC = isUncensored(dom);
       const { magnetOptions, ...options } = Offline.getOptions(action, details);
