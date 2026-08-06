@@ -134,6 +134,23 @@ const LOAD_CLASS = "is-loading";
 
 const MATCH_API = "reMatch";
 const MATCH_DELAY = 750;
+const syncOfflineMatch = (details, res) => {
+  const match = res?.status === "success" ? res.match : null;
+  if (!match || window.parent === window) return false;
+  window.parent.postMessage({
+    source: "JavDB.match115",
+    type: "offline",
+    id: crypto.randomUUID(),
+    operation: "offline",
+    code: details.code,
+    data: match.files,
+    cid: match.cid,
+    realPath: match.realPath,
+    hasCover: match.hasCover,
+    subtitleFiles: match.subtitleFiles,
+  }, location.origin);
+  return true;
+};
 const WIKI_BASE_URL = "https://ja.wikipedia.org/wiki/";
 const ACTRESS_INFO_NOT_FOUND = "未找到演员信息";
 
@@ -472,7 +489,7 @@ const offline = async ({ options, magnets, onstart, onprogress, onfinally }, cur
 
     Grant.notify(res);
     Util.setFavicon(res);
-    setTimeout(() => unsafeWindow[MATCH_API]?.(true), MATCH_DELAY);
+    if (!syncOfflineMatch(details, res)) setTimeout(() => unsafeWindow[MATCH_API]?.(true), MATCH_DELAY);
   };
 
   const onclick = (e) => {

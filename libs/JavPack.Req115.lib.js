@@ -554,7 +554,7 @@ class Req115 extends Drive115 {
     if (labels.length) return this.filesBatchLabel(files.map((it) => it.fid).toString(), labels.toString());
   }
 
-  static handleRename(files, cid, { rename, renameTxt, zh, crack, leaked, uncensored }) {
+  static buildRenameObject(files, cid, { rename, renameTxt, zh, crack, leaked, uncensored }) {
     rename = rename.replaceAll("$zh", zh ? renameTxt.zh : "");
     rename = rename.replaceAll("$crack", crack ? renameTxt.crack : "");
     rename = rename.replaceAll("$leaked", leaked ? renameTxt.leaked : "");
@@ -567,7 +567,7 @@ class Req115 extends Drive115 {
     if (files.length === 1) {
       const { fid, ico } = files[0];
       renameObj[fid] = `${rename}.${ico}`;
-      return this.filesBatchRename(renameObj);
+      return renameObj;
     }
 
     const icoMap = files.reduce((acc, { ico, ...item }) => {
@@ -591,7 +591,11 @@ class Req115 extends Drive115 {
         });
     }
 
-    return this.filesBatchRename(renameObj);
+    return renameObj;
+  }
+
+  static handleRename(files, cid, options) {
+    return this.filesBatchRename(this.buildRenameObject(files, cid, options));
   }
 
   static async handleCover(url, cid, filename) {
@@ -645,26 +649,36 @@ class Req115 extends Drive115 {
       // the whole task's video set in its one 115 task directory instead of
       // cleaning everything except the filename that matched the code.
       const bundleVideos = isVR && allVideos.length ? allVideos : videos;
-      const { data: srts = [] } = await this.filesAllSRTs(file_id);
+      const srtRes = await this.filesAllSRTs(file_id);
+      const srts = srtRes?.data || [];
       const files = [...bundleVideos, ...srts];
+      let syncedVideos = bundleVideos;
 
       if (clean) await this.handleClean(files, file_id);
 
       if (tags.length) await this.handleTags(bundleVideos, tags);
 
-      if (rename) await this.handleRename(files, file_id, {
-        rename,
-        renameTxt,
-        zh: zh || srts.length,
-        crack,
-        leaked,
-        uncensored: uncensored || magnetUncensored,
-      });
+      if (rename) {
+        const renameObj = this.buildRenameObject(files, file_id, {
+          rename,
+          renameTxt,
+          zh: zh || srts.length,
+          crack,
+          leaked,
+          uncensored: uncensored || magnetUncensored,
+        });
+        await this.filesBatchRename(renameObj);
+        syncedVideos = bundleVideos.map((file) => ({ ...file, n: renameObj[file.fid] || file.n }));
+      }
 
+      let hasCover = false;
       if (cover) {
         try {
           const { data } = await this.handleCover(cover, file_id, `${code}.cover.jpg`);
-          if (data?.file_id) await this.filesEdit(file_id, data.file_id);
+          if (data?.file_id) {
+            await this.filesEdit(file_id, data.file_id);
+            hasCover = true;
+          }
         } catch (err) {
           console.warn("[Req115.handleCover]", err?.message);
         }
@@ -672,6 +686,16 @@ class Req115 extends Drive115 {
 
       res.msg = `${code} 离线任务成功`;
       res.status = "success";
+      res.match = {
+        cid: file_id,
+        files: syncedVideos.map((file) => ({ ...file, cid: file_id })),
+        realPath: (srtRes?.path || [])
+          .map((part) => part?.name || part?.file_name || part?.n)
+          .filter((name) => name && name !== "网盘" && name !== "115")
+          .join("/"),
+        hasCover,
+        subtitleFiles: srts,
+      };
       break;
     }
 

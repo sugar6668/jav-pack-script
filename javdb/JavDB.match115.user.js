@@ -177,7 +177,7 @@ const formatBytes = (bytes, k = 1024) => {
 };
 
 const extractData = (data, format = "s") => {
-  const keys = ["pc", "cid", "fid", "n", "s", "t", "ico", "paths", "realPath", "name", "file_name"];
+  const keys = ["pc", "cid", "fid", "n", "s", "t", "ico", "paths", "realPath", "name", "file_name", "hasCover", "hasSubtitle", "subtitleFiles", "subtitleDetectionVersion"];
   return data.map((item) => {
     const source = JSON.parse(JSON.stringify(item, keys));
     return { ...source, bytes: Number(item[format]) || 0, [format]: formatBytes(item[format]) };
@@ -707,13 +707,30 @@ const getPageDetails = (dom = document) => {
       handledSyncs.add(payload.id);
       setTimeout(() => handledSyncs.delete(payload.id), 30 * 1000);
     }
-    if (payload.type === "sync" && Array.isArray(payload.data)) {
-      MatchCache.set(payload.code, payload.data);
+    if ((payload.type === "sync" || payload.type === "offline") && Array.isArray(payload.data)) {
+      const sources = payload.type === "offline"
+        ? extractData(payload.data).map((file) => {
+          const details = Util.codeParse(payload.code);
+          const subtitleFiles = (payload.subtitleFiles || [])
+            .filter((subtitle) => window.JavPackMatch115Console?.belongsToVideoSubtitleFile?.(file, subtitle, details))
+            .map((subtitle) => ({ n: subtitle.n || subtitle.name || subtitle.file_name || "", s: subtitle.s || 0 }));
+          return {
+            ...file,
+            cid: payload.cid || file.cid,
+            realPath: payload.realPath || file.realPath,
+            hasCover: Boolean(payload.hasCover),
+            hasSubtitle: Boolean(subtitleFiles.length),
+            subtitleFiles,
+            subtitleDetectionVersion: window.JavPackMatch115Console?.subtitleDetectionVersion,
+          };
+        })
+        : payload.data;
+      MatchCache.set(payload.code, sources);
       // The parent receives an exact post-mutation snapshot before the Quick
       // View frame disappears, so it can repaint without querying 115 again.
       window.dispatchEvent(new CustomEvent("JavDB_MatchCacheSynced", { detail: { code: payload.code, operation: payload.operation } }));
     }
-    matchQueue(document.querySelectorAll(`.${parseCodeCls(payload.code)}`), { force: true, cacheOnly: payload.type === "sync" });
+    matchQueue(document.querySelectorAll(`.${parseCodeCls(payload.code)}`), { force: true, cacheOnly: payload.type === "sync" || payload.type === "offline" });
   };
   CHANNEL.onmessage = ({ data }) => receiveMatchState(data);
   window.addEventListener("message", ({ data, origin }) => {
