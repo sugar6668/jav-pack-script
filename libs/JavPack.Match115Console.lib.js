@@ -444,9 +444,6 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
 
       const { req115 = window.Req115 || (typeof Req115 !== "undefined" ? Req115 : null), grant = window.Grant || (typeof Grant !== "undefined" ? Grant : null), details = {} } = options;
       if (!req115) return;
-      // A later explicit action is the user's confirmation that the account is
-      // usable again.  Resume retained work instead of silently retrying it.
-      if (req115.getMutationState?.().paused) req115.resumeMutations();
       const itemNode = actionBtn.closest(".zymatch-item");
       let members = [];
       try { members = JSON.parse(itemNode?.dataset.members || "[]"); } catch (_) {}

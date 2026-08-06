@@ -645,13 +645,9 @@ const getPageDetails = (dom = document) => {
       const { code, prefix, searchKey } = details;
       const cache = MatchCache.get(code) ?? MatchCache.get(prefix);
       if (cache !== null) {
-        if (cacheOnly) return after?.(details, cache);
-        return enrichMetadata(cache, details)
-          .then((sources) => {
-            MatchCache.set(code, sources);
-            after?.(details, sources);
-          })
-          .catch(() => after?.(details, cache));
+        // Cached rows already include the fields needed to render the card.
+        // Do not turn a page refresh into one directory request per matched item.
+        return after?.(details, cache);
       }
 
       if (!wait[searchKey]) wait[searchKey] = [];

@@ -169,6 +169,8 @@ class Drive115 extends Req {
 class Req115 extends Drive115 {
   static MUTATION_GAP = 2000;
   static MUTATION_COORDINATOR_KEY = "__JavPack115MutationCoordinatorV1";
+  static REQUEST_GAP = 2000;
+  static REQUEST_COORDINATOR_KEY = "__JavPack115RequestCoordinatorV1";
 
   static getMutationRoot() {
     try {
@@ -176,6 +178,84 @@ class Req115 extends Drive115 {
       if (typeof window !== "undefined" && window.top) return window.top;
     } catch (_) {}
     return globalThis;
+  }
+
+  static is115Request(config) {
+    const url = typeof config === "string" ? config : config?.url;
+    if (!url) return false;
+    try {
+      return /(^|\.)115\.com$/i.test(new URL(url, location.origin).hostname);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static getRequestCoordinator() {
+    const root = this.getMutationRoot();
+    let coordinator = root[this.REQUEST_COORDINATOR_KEY];
+    if (coordinator) return coordinator;
+
+    coordinator = { queue: [], running: false, paused: null, lastFinishedAt: 0, drain: null };
+    coordinator.drain = async () => {
+      if (coordinator.running || coordinator.paused || !coordinator.queue.length) return;
+      coordinator.running = true;
+      const entry = coordinator.queue.shift();
+      try {
+        const wait = Math.max(0, coordinator.lastFinishedAt + this.REQUEST_GAP - Date.now());
+        if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+        if (coordinator.paused) {
+          coordinator.queue.unshift(entry);
+          return;
+        }
+        entry.resolve(await entry.task());
+      } catch (err) {
+        entry.reject(err);
+      } finally {
+        coordinator.running = false;
+        coordinator.lastFinishedAt = Date.now();
+        if (!coordinator.paused && coordinator.queue.length) coordinator.drain();
+      }
+    };
+    root[this.REQUEST_COORDINATOR_KEY] = coordinator;
+    return coordinator;
+  }
+
+  static queue115Request(task) {
+    const coordinator = this.getRequestCoordinator();
+    return new Promise((resolve, reject) => {
+      coordinator.queue.push({ task, resolve, reject });
+      coordinator.drain();
+    });
+  }
+
+  static pauseRequests(reason = "115 请求已暂停") {
+    const coordinator = this.getRequestCoordinator();
+    if (coordinator.paused) return;
+    coordinator.paused = { reason, at: Date.now() };
+    // A risk response from a read endpoint must also stop queued write work.
+    // Recovery remains tied to the existing successful verification path.
+    this.pauseMutations(reason);
+  }
+
+  static resumeRequests() {
+    const coordinator = this.getRequestCoordinator();
+    coordinator.paused = null;
+    coordinator.drain();
+  }
+
+  static isRiskResponse(response) {
+    const code = Number(response?.errcode ?? response?.code);
+    const message = String(response?.error_msg || response?.message || "");
+    return code === 911 || /安全验证|风控|操作频繁|请求频繁|captcha|risk.?control/i.test(message);
+  }
+
+  static request(config) {
+    if (!this.is115Request(config)) return super.request(config);
+    return this.queue115Request(async () => {
+      const response = await super.request(config);
+      if (this.isRiskResponse(response)) this.pauseRequests(response.error_msg || response.message || "115 需要安全验证");
+      return response;
+    });
   }
 
   static getMutationCoordinator() {
@@ -273,6 +353,7 @@ class Req115 extends Drive115 {
   static resumeMutations() {
     const coordinator = this.getMutationCoordinator();
     coordinator.paused = null;
+    this.resumeRequests();
     coordinator.drain();
   }
 
