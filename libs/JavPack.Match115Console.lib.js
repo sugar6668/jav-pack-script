@@ -345,7 +345,9 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     });
 
     // 仅把“*.cover.图片扩展名”视为已存在的封面；目标目录已有该封面时不再上传，避免重复封面文件。
-    const { data: targetFiles = [] } = await req115.files(targetCid, { limit: 1150 }).catch(() => ({ data: [] }));
+    const targetRes = await req115.files(targetCid, { limit: 1150 }).catch(() => ({ data: [], path: [] }));
+    const targetFiles = targetRes?.data || [];
+    const targetPath = this.formatPathParts(targetRes?.path || []) || ["根目录", ...targetDir].join("/");
     let coverError = "";
     let hasCover = this.hasCoverFile(targetFiles);
     if (details.cover && !hasCover) {
@@ -380,7 +382,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     item.archiveSync = {
       sourceCid: file.cid,
       cid: targetCid,
-      realPath: targetDir.join("/"),
+      realPath: targetPath,
       // The move/rename result is known locally.  Do not wait for the listing
       // index to catch up before synchronizing the small window and its card.
       files: renamedFiles,
@@ -536,6 +538,13 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
             const nameNode = itemDom?.querySelector(".x-match-name");
             if (nameNode) nameNode.textContent = renamed.n;
             itemDom?.querySelectorAll("[data-n]").forEach((node) => { node.dataset.n = renamed.n; });
+          }
+          const matchNode = itemDom?.querySelector(".x-match");
+          if (matchNode) {
+            matchNode.title = this.formatItemTip(
+              { ...item, ...renamed, cid: newCid },
+              item.archiveSync?.realPath || dirNode?.textContent,
+            );
           }
           const coverBtn = itemDom?.querySelector('.x-match-cover');
           if (coverBtn && item.archiveSync?.hasCover) {
