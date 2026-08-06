@@ -450,6 +450,8 @@ const getPageDetails = (dom = document) => {
     crack: "var(--x-info)",
     subtitle: "var(--x-warning)",
     both: "var(--x-danger)",
+    leak: "var(--x-leak)",
+    leakZh: "var(--x-leak-zh)",
   };
 
   const movieList = document.querySelectorAll(MOVIE_SELECTOR);
@@ -459,6 +461,9 @@ const getPageDetails = (dom = document) => {
   const getMatchType = ({ n }) => {
     const crack = Magnet.crackReg.test(n);
     const subtitle = Magnet.zhReg.test(n);
+    const leaked = Magnet.leakReg.test(n);
+    if (leaked && subtitle) return "leakZh";
+    if (leaked) return "leak";
     if (crack && subtitle) return "both";
     if (subtitle) return "subtitle";
     if (crack) return "crack";
@@ -505,10 +510,12 @@ const getPageDetails = (dom = document) => {
     if (len) {
       const zhs = sources.filter((it) => Magnet.zhReg.test(it.n));
       const crack = sources.find((it) => Magnet.crackReg.test(it.n));
+      const leaked = sources.find((it) => Magnet.leakReg.test(it.n));
 
       const zh = zhs[0];
       const both = zhs.find((it) => Magnet.crackReg.test(it.n));
-      const active = both ?? zh ?? crack ?? sources[0];
+      const leakZh = zhs.find((it) => Magnet.leakReg.test(it.n));
+      const active = leakZh ?? leaked ?? both ?? zh ?? crack ?? sources[0];
       const types = getMatchTypes(sources);
       const isVR = Boolean(target.dataset.isVr === "1");
       const presentation = getPresentationItems(sources, { isVR });
@@ -516,7 +523,7 @@ const getPageDetails = (dom = document) => {
       pc = active.pc;
       cid = active.cid;
       title = presentation.map(formatTip).join("\n\n");
-      className = both ? "is-danger" : zh ? "is-warning" : crack ? "is-info" : "is-success";
+      className = leakZh ? "is-leak-zh" : leaked ? "is-leak" : both ? "is-danger" : zh ? "is-warning" : crack ? "is-info" : "is-success";
       textContent = "已匹配";
       if (len > 1 && !isVR) textContent += ` ${len}`;
 

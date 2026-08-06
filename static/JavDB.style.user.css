@@ -9,10 +9,14 @@
   --x-info: rgb(13 110 253);
   --x-warning: rgb(255 193 7);
   --x-danger: rgb(220 53 69);
+  --x-leak: rgb(0 170 188);
+  --x-leak-zh: rgb(177 62 174);
   --x-success-bd: var(--x-success);
   --x-info-bd: var(--x-info);
   --x-warning-bd: var(--x-warning);
   --x-danger-bd: var(--x-danger);
+  --x-leak-bd: var(--x-leak);
+  --x-leak-zh-bd: var(--x-leak-zh);
   --x-layout-page-width: 96%;
   --x-layout-detail-width: 96%;
   --x-layout-columns: 4;
@@ -27,6 +31,8 @@
     --x-info-bd: var(--x-info);
     --x-warning-bd: var(--x-warning);
     --x-danger-bd: var(--x-danger);
+    --x-leak-bd: var(--x-leak);
+    --x-leak-zh-bd: var(--x-leak-zh);
 
     color-scheme: dark;
     background-color: transparent;
@@ -429,6 +435,16 @@ html.x-actor-matched-only .movie-list .item:not(:has(.x-match:not(.is-normal))) 
       border-color: var(--x-danger-bd);
     }
 
+    &:has(.x-match.is-leak):not(.x-multi-matched) {
+      background-color: transparent;
+      border-color: var(--x-leak-bd);
+    }
+
+    &:has(.x-match.is-leak-zh):not(.x-multi-matched) {
+      background-color: transparent;
+      border-color: var(--x-leak-zh-bd);
+    }
+
     .cover {
       padding-top: 67.25%;
       overflow: hidden;
@@ -526,6 +542,16 @@ html.x-actor-matched-only .movie-list .item:not(:has(.x-match:not(.is-normal))) 
 
         &.is-danger {
           background-color: var(--x-danger);
+        }
+
+        &.is-leak {
+          color: #fff;
+          background-color: var(--x-leak);
+        }
+
+        &.is-leak-zh {
+          color: #fff;
+          background-color: var(--x-leak-zh);
         }
       }
 
