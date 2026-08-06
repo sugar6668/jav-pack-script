@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.filter
 // @namespace       JavDB.filter@blc
-// @version         0.0.16
+// @version         0.0.18
 // @author          blc
 // @description     评分筛选与性癖净化
 // @match           https://javdb.com/*
@@ -14,6 +14,10 @@
 
 (function () {
   const MANUAL_BLOCK_STORAGE_KEY = "manualBlockedMovies";
+  const KEYWORD_CONFIG_STORAGE_KEY = "JavDB.filter.keywordConfig.v1";
+  const KEYWORD_CONFIG_EVENT = "JavDB.filter.keywordConfigChanged";
+  const SCORE_CONFIG_STORAGE_KEY = "JavDB.filter.scoreConfig.v1";
+  const SCORE_CONFIG_EVENT = "JavDB.filter.scoreConfigChanged";
   const MENU_ID = "javdb-filter-menu";
   const FILTER_TOGGLE_ID = "x-score-filter-toggle";
   const ACTOR_MATCH_TOGGLE_ID = "x-actor-match-toggle";
@@ -22,19 +26,63 @@
   let actorMatchedOnly = false;
   let actorMatchLoadQueued = false;
 
-  const SCORE_CONFIG = {
-    lowOpacity: "10%",
-    weakOpacity: "30%",
+  const DEFAULT_SCORE_CONFIG = Object.freeze({
     lowRating: 3.8,
     weakRating: 4.0,
     lowVotes: 20,
     weakVotes: 30,
     highlightRating: 3.8,
     highlightVotes: 300,
+    highlightStart: "#00ffff",
+    highlightEnd: "#e0ffff",
     topRating: 4.0,
     topVotes: 1000,
-    westernCodePattern: /[A-Za-z]+[\.\s-]+(20\d{2}|\d{2})[.-]\d{2}[.-]\d{2}/,
+    topStart: "#ff69b4",
+    topEnd: "#ffb6c1",
+    lowVisibility: 10,
+    weakVisibility: 30,
+    westernBypass: true,
+  });
+  const WESTERN_CODE_PATTERN = /[A-Za-z]+[\.\s-]+(20\d{2}|\d{2})[.-]\d{2}[.-]\d{2}/;
+  const SCORE_BACKGROUND_PROPERTIES = ["background", "background-image", "background-color", "background-position", "background-size", "background-repeat", "background-origin", "background-clip", "background-attachment"];
+  const scoreCardBackgrounds = new WeakMap();
+
+  const clampScoreNumber = (value, min, max, fallback, precision = 0) => {
+    if (value == null || typeof value === "boolean" || (typeof value === "string" && !value.trim())) return fallback;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return fallback;
+    const clamped = Math.min(Math.max(numeric, min), max);
+    return precision ? Number(clamped.toFixed(precision)) : Math.round(clamped);
   };
+  const normalizeScoreColor = (value, fallback) => /^#[0-9a-f]{6}$/i.test(String(value || ""))
+    ? String(value).toLowerCase()
+    : fallback;
+  const normalizeScoreConfig = (source = {}) => ({
+    lowRating: clampScoreNumber(source.lowRating, 0, 5, DEFAULT_SCORE_CONFIG.lowRating, 1),
+    weakRating: clampScoreNumber(source.weakRating, 0, 5, DEFAULT_SCORE_CONFIG.weakRating, 1),
+    lowVotes: clampScoreNumber(source.lowVotes, 0, 10000000, DEFAULT_SCORE_CONFIG.lowVotes),
+    weakVotes: clampScoreNumber(source.weakVotes, 0, 10000000, DEFAULT_SCORE_CONFIG.weakVotes),
+    highlightRating: clampScoreNumber(source.highlightRating, 0, 5, DEFAULT_SCORE_CONFIG.highlightRating, 1),
+    highlightVotes: clampScoreNumber(source.highlightVotes, 0, 10000000, DEFAULT_SCORE_CONFIG.highlightVotes),
+    highlightStart: normalizeScoreColor(source.highlightStart, DEFAULT_SCORE_CONFIG.highlightStart),
+    highlightEnd: normalizeScoreColor(source.highlightEnd, DEFAULT_SCORE_CONFIG.highlightEnd),
+    topRating: clampScoreNumber(source.topRating, 0, 5, DEFAULT_SCORE_CONFIG.topRating, 1),
+    topVotes: clampScoreNumber(source.topVotes, 0, 10000000, DEFAULT_SCORE_CONFIG.topVotes),
+    topStart: normalizeScoreColor(source.topStart, DEFAULT_SCORE_CONFIG.topStart),
+    topEnd: normalizeScoreColor(source.topEnd, DEFAULT_SCORE_CONFIG.topEnd),
+    lowVisibility: clampScoreNumber(source.lowVisibility, 0, 100, DEFAULT_SCORE_CONFIG.lowVisibility),
+    weakVisibility: clampScoreNumber(source.weakVisibility, 0, 100, DEFAULT_SCORE_CONFIG.weakVisibility),
+    westernBypass: typeof source.westernBypass === "boolean" ? source.westernBypass : DEFAULT_SCORE_CONFIG.westernBypass,
+  });
+  const readScoreConfig = () => {
+    try {
+      return normalizeScoreConfig(JSON.parse(localStorage.getItem(SCORE_CONFIG_STORAGE_KEY) || "{}"));
+    } catch (_) {
+      return { ...DEFAULT_SCORE_CONFIG };
+    }
+  };
+  let scoreConfig = readScoreConfig();
+  let scoreRefreshQueued = false;
 
   const PURIFY_CONFIG = {
     blockedIDs: [],
@@ -52,15 +100,40 @@
     },
   };
 
-  const flatten = (source) => {
-    if (Array.isArray(source)) return source;
-    return Object.values(source).flat();
+  const flatten = (source) => Array.isArray(source) ? source : Object.values(source).flat();
+  const normalizeKeywords = (source) => [...new Set(
+    flatten(source)
+      .flatMap((item) => String(item).split(/[,，\r\n]+/))
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean),
+  )];
+  const DEFAULT_KEYWORD_CONFIG = Object.freeze({
+    titleKeywords: normalizeKeywords(PURIFY_CONFIG.blockedTitleKeywords),
+    tagKeywords: normalizeKeywords(PURIFY_CONFIG.blockedTags),
+  });
+  const readKeywordConfig = () => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(KEYWORD_CONFIG_STORAGE_KEY) || "{}");
+      return {
+        titleKeywords: normalizeKeywords(Array.isArray(saved.titleKeywords) ? saved.titleKeywords : DEFAULT_KEYWORD_CONFIG.titleKeywords),
+        tagKeywords: normalizeKeywords(Array.isArray(saved.tagKeywords) ? saved.tagKeywords : DEFAULT_KEYWORD_CONFIG.tagKeywords),
+      };
+    } catch (_) {
+      return {
+        titleKeywords: [...DEFAULT_KEYWORD_CONFIG.titleKeywords],
+        tagKeywords: [...DEFAULT_KEYWORD_CONFIG.tagKeywords],
+      };
+    }
   };
-
-  const lowerList = (source) => flatten(source).map((item) => String(item).toLowerCase()).filter(Boolean);
-  const idsToBlock = lowerList(PURIFY_CONFIG.blockedIDs);
-  const titlesToBlock = lowerList(PURIFY_CONFIG.blockedTitleKeywords);
-  const tagsToBlock = lowerList(PURIFY_CONFIG.blockedTags);
+  const idsToBlock = normalizeKeywords(PURIFY_CONFIG.blockedIDs);
+  let titlesToBlock = [];
+  let tagsToBlock = [];
+  const refreshKeywordConfig = () => {
+    const next = readKeywordConfig();
+    titlesToBlock = next.titleKeywords;
+    tagsToBlock = next.tagKeywords;
+  };
+  refreshKeywordConfig();
   const loadManualBlocks = () => {
     try {
       const saved = typeof GM_getValue === "function"
@@ -125,31 +198,47 @@
     return tagsToBlock.some((tag) => metaText.includes(tag));
   };
 
+  const restoreScoreBackground = (cardBox) => {
+    const original = scoreCardBackgrounds.get(cardBox);
+    if (!original) return;
+    SCORE_BACKGROUND_PROPERTIES.forEach((property) => cardBox.style.removeProperty(property));
+    original.forEach(({ property, value, priority }) => {
+      if (value) cardBox.style.setProperty(property, value, priority);
+    });
+  };
+
   const applyScoreFilter = (item, details) => {
-    if (item.dataset.scoreProcessed === "1") return;
+    const cardBox = item.children?.[0];
+    item.classList.remove("x-score-mask-low", "x-score-mask-weak", "x-score-filtered");
+    if (cardBox) {
+      if (!scoreCardBackgrounds.has(cardBox)) {
+        scoreCardBackgrounds.set(cardBox, SCORE_BACKGROUND_PROPERTIES.map((property) => ({
+          property,
+          value: cardBox.style.getPropertyValue(property),
+          priority: cardBox.style.getPropertyPriority(property),
+        })));
+      }
+      restoreScoreBackground(cardBox);
+    }
 
     const score = parseScore(details.score);
     if (!score) return;
 
     const { rating, votes } = score;
-    const isWestern = SCORE_CONFIG.westernCodePattern.test(details.fullText);
-    if (!isWestern) {
-      if (rating < SCORE_CONFIG.lowRating || (rating <= SCORE_CONFIG.weakRating && votes < SCORE_CONFIG.lowVotes)) {
+    const isWestern = WESTERN_CODE_PATTERN.test(details.fullText);
+    if (!(scoreConfig.westernBypass && isWestern)) {
+      if (rating < scoreConfig.lowRating || (rating <= scoreConfig.weakRating && votes < scoreConfig.lowVotes)) {
         item.classList.add("x-score-mask-low", "x-score-filtered");
-      } else if (rating >= SCORE_CONFIG.weakRating && votes < SCORE_CONFIG.weakVotes) {
+      } else if (rating >= scoreConfig.weakRating && votes < scoreConfig.weakVotes) {
         item.classList.add("x-score-mask-weak", "x-score-filtered");
       }
     }
 
-    const cardBox = item.children?.[0];
-    if (rating > SCORE_CONFIG.highlightRating && votes > SCORE_CONFIG.highlightVotes && cardBox) {
-      cardBox.style.background = "linear-gradient(cyan 50%, lightcyan 100%)";
+    if (rating > scoreConfig.topRating && votes > scoreConfig.topVotes && cardBox) {
+      cardBox.style.background = `linear-gradient(${scoreConfig.topStart} 50%, ${scoreConfig.topEnd} 100%)`;
+    } else if (rating > scoreConfig.highlightRating && votes > scoreConfig.highlightVotes && cardBox) {
+      cardBox.style.background = `linear-gradient(${scoreConfig.highlightStart} 50%, ${scoreConfig.highlightEnd} 100%)`;
     }
-    if (rating > SCORE_CONFIG.topRating && votes > SCORE_CONFIG.topVotes && cardBox) {
-      cardBox.style.background = "linear-gradient(hotpink 50%, lightpink 100%)";
-    }
-
-    item.dataset.scoreProcessed = "1";
   };
 
   const applyPurify = (item, details) => {
@@ -157,11 +246,10 @@
       item.remove();
       return true;
     }
-    if (item.dataset.purifyProcessed === "1") return false;
-    item.dataset.purifyProcessed = "1";
-    if (!shouldRemove(details)) return false;
-    item.remove();
-    return true;
+    const keywordBlocked = shouldRemove(details);
+    item.classList.toggle("x-purify-keyword-hidden", keywordBlocked);
+    item.dataset.purifyKeywordHidden = keywordBlocked ? "1" : "";
+    return false;
   };
 
   const processCards = (list) => {
@@ -172,6 +260,38 @@
       applyScoreFilter(item, details);
     });
   };
+
+  const refreshKeywordFilteredCards = () => {
+    refreshKeywordConfig();
+    processCards(document.querySelectorAll(".movie-list .item"));
+  };
+
+  const applyScoreMaskVisibility = (next = scoreConfig) => {
+    const root = document.documentElement;
+    root.style.setProperty("--x-score-low-mask-opacity", String(1 - next.lowVisibility / 100));
+    root.style.setProperty("--x-score-weak-mask-opacity", String(1 - next.weakVisibility / 100));
+  };
+  const scheduleScoreRefresh = () => {
+    if (scoreRefreshQueued) return;
+    scoreRefreshQueued = true;
+    requestAnimationFrame(() => {
+      scoreRefreshQueued = false;
+      processCards(document.querySelectorAll(".movie-list .item"));
+    });
+  };
+  const refreshScoreConfig = (next) => {
+    scoreConfig = normalizeScoreConfig(next || readScoreConfig());
+    applyScoreMaskVisibility(scoreConfig);
+    scheduleScoreRefresh();
+  };
+
+  const filterStyle = document.createElement("style");
+  filterStyle.textContent = `
+    .movie-list .item.x-purify-keyword-hidden { display: none !important; }
+    .x-score-mask-low::after { opacity: var(--x-score-low-mask-opacity, .9) !important; }
+    .x-score-mask-weak::after { opacity: var(--x-score-weak-mask-opacity, .7) !important; }
+  `;
+  document.head.append(filterStyle);
 
   const updateScoreFilterToggle = () => {
     const button = document.getElementById(FILTER_TOGGLE_ID);
@@ -245,7 +365,7 @@
   const queueMoreActorWorksIfNeeded = () => {
     if (!actorMatchedOnly || !isActorWorksPage()) return;
 
-    const items = [...document.querySelectorAll(".movie-list .item")];
+    const items = [...document.querySelectorAll(".movie-list .item:not(.x-purify-keyword-hidden)")];
     const allItemsProcessed = items.length && items.every((item) => item.querySelector(".x-match"));
     const hasMatchedItems = items.some((item) => item.querySelector(".x-match:not(.is-normal)"));
     if (!allItemsProcessed || hasMatchedItems) return;
@@ -320,6 +440,7 @@
     document.body.append(menu);
   };
 
+  applyScoreMaskVisibility(scoreConfig);
   setScoreFilterEnabled(true);
   setActorMatchedOnly(false);
   if (!initToolbarControls()) {
@@ -331,6 +452,12 @@
   }
 
   processCards(document.querySelectorAll(".movie-list .item"));
+  window.addEventListener(KEYWORD_CONFIG_EVENT, refreshKeywordFilteredCards);
+  window.addEventListener(SCORE_CONFIG_EVENT, () => refreshScoreConfig());
+  window.addEventListener("storage", (event) => {
+    if (event.key === KEYWORD_CONFIG_STORAGE_KEY) refreshKeywordFilteredCards();
+    if (event.key === SCORE_CONFIG_STORAGE_KEY) refreshScoreConfig();
+  });
   window.addEventListener("JavDB.scroll", ({ detail }) => {
     processCards(detail || []);
     queueMoreActorWorksIfNeeded();

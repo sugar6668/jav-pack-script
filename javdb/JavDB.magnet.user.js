@@ -35,8 +35,11 @@ Util.upStore();
   const HD_SIZE = Number.parseFloat(transByte("2GB"));
   const MIN_SIZE = Number.parseFloat(transByte("250MB"));
 
-  const UNC = document.querySelector(".title.is-4").textContent.includes("無碼");
   const CONT = document.querySelector("#magnets-content");
+
+  const decodeMagnetUrl = (value = "") => {
+    try { return decodeURIComponent(value); } catch (_) { return value; }
+  };
 
   const WHATS_LINK_API = "https://whatslink.info/api/v1/link";
   const NEXT_ICON = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M11.2929 4.70711C10.9024 4.31658 10.9024 3.68342 11.2929 3.29289C11.6834 2.90237 12.3166 2.90237 12.7071 3.29289L20.7071 11.2929C21.0976 11.6834 21.0976 12.3166 20.7071 12.7071L12.7071 20.7071C12.3166 21.0976 11.6834 21.0976 11.2929 20.7071C10.9024 20.3166 10.9024 19.6834 11.2929 19.2929L18.5858 12L11.2929 4.70711Z" fill="currentColor"></path><path d="M3.29289 4.70711C2.90237 4.31658 2.90237 3.68342 3.29289 3.29289C3.68342 2.90237 4.31658 2.90237 4.70711 3.29289L12.7071 11.2929C13.0976 11.6834 13.0976 12.3166 12.7071 12.7071L4.70711 20.7071C4.31658 21.0976 3.68342 21.0976 3.29289 20.7071C2.90237 20.3166 2.90237 19.6834 3.29289 19.2929L10.5858 12L3.29289 4.70711Z" fill="currentColor"></path></svg>`;
@@ -122,13 +125,14 @@ Util.upStore();
           size: meta[0].replace(/\s/g, ""),
           files: meta?.[1]?.replace("個文件", "").trim() ?? "",
           zh: !!node.querySelector(".tags .is-warning"),
+          tagText: [...node.querySelectorAll(".tags .tag")].map((tag) => tag.textContent.trim()).join(" "),
           date: node.querySelector(".time")?.textContent.trim() ?? "",
         };
       })
       .filter(({ url }) => url);
   };
 
-  const renderMagnet = ({ url, name, meta, zh, crack, hd, date, type }, idx) => {
+  const renderMagnet = ({ url, name, meta, zh, crack, leaked, hd, date, type }, idx) => {
     return `
     <div class="item columns is-desktop${(idx + 1) % 2 !== 0 ? " odd" : ""}">
       <div class="magnet-name column is-four-fifths">
@@ -138,6 +142,7 @@ Util.upStore();
           <div class="tags">
             ${zh ? "<span class='tag is-warning is-small is-light'>字幕</span>" : ""}
             ${crack ? "<span class='tag is-info is-small is-light'>破解</span>" : ""}
+            ${leaked ? "<span class='tag is-danger is-small is-light'>流出</span>" : ""}
             ${hd ? "<span class='tag is-primary is-small is-light'>高清</span>" : ""}
             ${type === "ed2k" ? "<span class='tag is-small is-light x-magnet-type'>ed2k</span>" : ""}
           </div>
@@ -177,7 +182,7 @@ Util.upStore();
   };
 
   const mergeMagnet = (target, source) => {
-    ["name", "size", "files", "zh", "crack", "date"].forEach((key) => {
+    ["name", "size", "files", "zh", "crack", "leaked", "date"].forEach((key) => {
       if (!target[key] && source[key]) target[key] = source[key];
     });
     return target;
@@ -188,11 +193,14 @@ Util.upStore();
     return index === -1 ? acc.concat(cur) : acc.toSpliced(index, 1, mergeMagnet(acc[index], cur));
   };
 
-  const parseName = ({ url, name, zh, ...item }) => {
+  const parseName = ({ url, name, zh, tagText = "", ...item }) => {
+    const rawUrl = url;
     url = url.split("&")[0].toLowerCase();
     if (!zh) zh = Magnet.zhReg.test(name);
-    const crack = UNC ? false : Magnet.crackReg.test(name);
-    return { ...item, url, name, zh, crack };
+    const sourceText = [name, rawUrl, decodeMagnetUrl(rawUrl), tagText].join(" ");
+    const crack = Magnet.crackReg.test(sourceText);
+    const leaked = Magnet.leakReg.test(sourceText);
+    return { ...item, url, name, zh, crack, leaked };
   };
 
   const setMagnets = (details) => {

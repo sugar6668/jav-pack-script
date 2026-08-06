@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.layout
 // @namespace       JavDB.layout@blc
-// @version         0.0.4
+// @version         0.0.8
 // @author          blc
 // @description     JavDB 样式
 // @match           https://javdb.com/*
@@ -16,6 +16,16 @@
   "use strict";
 
   const STORE_KEY = "JavDB.layout.config";
+  const KEYWORD_CONFIG_STORAGE_KEY = "JavDB.filter.keywordConfig.v1";
+  const KEYWORD_CONFIG_EVENT = "JavDB.filter.keywordConfigChanged";
+  const SCORE_CONFIG_STORAGE_KEY = "JavDB.filter.scoreConfig.v1";
+  const SCORE_CONFIG_EVENT = "JavDB.filter.scoreConfigChanged";
+  const DEFAULT_SCORE_CONFIG = Object.freeze({
+    lowRating: 3.8, weakRating: 4.0, lowVotes: 20, weakVotes: 30,
+    highlightRating: 3.8, highlightVotes: 300, highlightStart: "#00ffff", highlightEnd: "#e0ffff",
+    topRating: 4.0, topVotes: 1000, topStart: "#ff69b4", topEnd: "#ffb6c1",
+    lowVisibility: 10, weakVisibility: 30, westernBypass: true,
+  });
   const DEFAULT_CONFIG = {
     pageWidth: 96,
     detailWidth: 96,
@@ -33,8 +43,77 @@
     mist: { name: "\u96fe\u84dd\u7d2b\u7f57\u5170", colors: ["#C9F2E5", "#76C6E6", "#8B91E8", "#E9A7C6"] },
   };
 
+  const DEFAULT_KEYWORD_CONFIG = Object.freeze({
+    titleKeywords: ["大便", "尿", "粪", "浣肠", "失禁", "排泄", "失便", "唾", "虐", "sm", "m男", "剛毛", "鼻", "アナル", "熟女", "男の娘", "男娘", "偽娘", "伪娘", "女装男子", "女装子", "ニューハーフ", "ふたなり", "futanari"],
+    tagKeywords: ["熟女", "排泄", "猎奇", "男の娘", "cross dressing", "cross-dressing", "女装", "ニューハーフ", "transsexual", "shemale", "futanari", "ふたなり"],
+  });
+
   const clamp = (value, min, max) => Math.min(Math.max(Number(value) || min, min), max);
+  const clampScoreNumber = (value, min, max, fallback, precision = 0) => {
+    if (value == null || typeof value === "boolean" || (typeof value === "string" && !value.trim())) return fallback;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return fallback;
+    const clamped = Math.min(Math.max(numeric, min), max);
+    return precision ? Number(clamped.toFixed(precision)) : Math.round(clamped);
+  };
+  const normalizeScoreColor = (value, fallback) => /^#[0-9a-f]{6}$/i.test(String(value || "")) ? String(value).toLowerCase() : fallback;
+  const normalizeScoreConfig = (source = {}) => ({
+    lowRating: clampScoreNumber(source.lowRating, 0, 5, DEFAULT_SCORE_CONFIG.lowRating, 1),
+    weakRating: clampScoreNumber(source.weakRating, 0, 5, DEFAULT_SCORE_CONFIG.weakRating, 1),
+    lowVotes: clampScoreNumber(source.lowVotes, 0, 10000000, DEFAULT_SCORE_CONFIG.lowVotes),
+    weakVotes: clampScoreNumber(source.weakVotes, 0, 10000000, DEFAULT_SCORE_CONFIG.weakVotes),
+    highlightRating: clampScoreNumber(source.highlightRating, 0, 5, DEFAULT_SCORE_CONFIG.highlightRating, 1),
+    highlightVotes: clampScoreNumber(source.highlightVotes, 0, 10000000, DEFAULT_SCORE_CONFIG.highlightVotes),
+    highlightStart: normalizeScoreColor(source.highlightStart, DEFAULT_SCORE_CONFIG.highlightStart),
+    highlightEnd: normalizeScoreColor(source.highlightEnd, DEFAULT_SCORE_CONFIG.highlightEnd),
+    topRating: clampScoreNumber(source.topRating, 0, 5, DEFAULT_SCORE_CONFIG.topRating, 1),
+    topVotes: clampScoreNumber(source.topVotes, 0, 10000000, DEFAULT_SCORE_CONFIG.topVotes),
+    topStart: normalizeScoreColor(source.topStart, DEFAULT_SCORE_CONFIG.topStart),
+    topEnd: normalizeScoreColor(source.topEnd, DEFAULT_SCORE_CONFIG.topEnd),
+    lowVisibility: clampScoreNumber(source.lowVisibility, 0, 100, DEFAULT_SCORE_CONFIG.lowVisibility),
+    weakVisibility: clampScoreNumber(source.weakVisibility, 0, 100, DEFAULT_SCORE_CONFIG.weakVisibility),
+    westernBypass: typeof source.westernBypass === "boolean" ? source.westernBypass : DEFAULT_SCORE_CONFIG.westernBypass,
+  });
+  const readScoreConfig = () => {
+    try { return normalizeScoreConfig(JSON.parse(localStorage.getItem(SCORE_CONFIG_STORAGE_KEY) || "{}")); }
+    catch (_) { return { ...DEFAULT_SCORE_CONFIG }; }
+  };
+  const writeScoreConfig = (next) => {
+    const normalized = normalizeScoreConfig(next);
+    localStorage.setItem(SCORE_CONFIG_STORAGE_KEY, JSON.stringify(normalized));
+    window.dispatchEvent(new CustomEvent(SCORE_CONFIG_EVENT));
+    return normalized;
+  };
   const getPreset = (id) => BACKGROUND_PRESETS[id] || BACKGROUND_PRESETS.telegram;
+  const normalizeKeywords = (source) => [...new Set(
+    (Array.isArray(source) ? source : source == null ? [] : [source])
+      .flatMap((item) => String(item).split(/[,，\r\n]+/))
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean),
+  )];
+  const readKeywordConfig = () => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(KEYWORD_CONFIG_STORAGE_KEY) || "{}");
+      return {
+        titleKeywords: normalizeKeywords(Array.isArray(saved.titleKeywords) ? saved.titleKeywords : DEFAULT_KEYWORD_CONFIG.titleKeywords),
+        tagKeywords: normalizeKeywords(Array.isArray(saved.tagKeywords) ? saved.tagKeywords : DEFAULT_KEYWORD_CONFIG.tagKeywords),
+      };
+    } catch (_) {
+      return {
+        titleKeywords: [...DEFAULT_KEYWORD_CONFIG.titleKeywords],
+        tagKeywords: [...DEFAULT_KEYWORD_CONFIG.tagKeywords],
+      };
+    }
+  };
+  const writeKeywordConfig = (next) => {
+    const normalized = {
+      titleKeywords: normalizeKeywords(next.titleKeywords),
+      tagKeywords: normalizeKeywords(next.tagKeywords),
+    };
+    localStorage.setItem(KEYWORD_CONFIG_STORAGE_KEY, JSON.stringify(normalized));
+    window.dispatchEvent(new CustomEvent(KEYWORD_CONFIG_EVENT));
+    return normalized;
+  };
 
   const readConfig = () => {
     const saved = GM_getValue(STORE_KEY, {});
@@ -95,9 +174,11 @@
       background-attachment: fixed !important;
     }
 
-    .x-layout-modal .modal-card { width: min(620px, calc(100vw - 28px)); border-radius: 14px; overflow: hidden; }
-    .x-layout-modal .modal-card-head { padding: 16px 20px; background: linear-gradient(135deg, #f8faff, #f0f5ff); }
-    .x-layout-modal .modal-card-body { display: grid; gap: 20px; padding: 22px 20px; }
+    .x-layout-modal .modal-card { display: flex; flex-direction: column; width: min(620px, calc(100vw - 28px)); height: min(780px, calc(100vh - 28px)); max-height: calc(100vh - 28px); border-radius: 14px; overflow: hidden; }
+    .x-layout-modal .modal-card-head { flex: 0 0 auto; padding: 16px 20px; background: linear-gradient(135deg, #f8faff, #f0f5ff); }
+    .x-layout-modal .modal-card-body { display: grid; flex: 1 1 auto; gap: 20px; min-height: 0; overflow-y: scroll; padding: 22px 20px; scrollbar-color: #aab7cf transparent; scrollbar-gutter: stable; scrollbar-width: thin; }
+    .x-layout-modal .modal-card-body::-webkit-scrollbar { width: 8px; }
+    .x-layout-modal .modal-card-body::-webkit-scrollbar-thumb { background: #aab7cf; border: 2px solid transparent; border-radius: 999px; background-clip: padding-box; }
     .x-layout-section { display: grid; gap: 12px; padding: 15px; border: 1px solid #e8edf5; border-radius: 10px; background: #fbfcff; }
     .x-layout-section-title { margin: 0; color: #344055; font-size: 13px; font-weight: 700; }
     .x-layout-field { display: grid; grid-template-columns: 92px 1fr 56px; align-items: center; gap: 12px; color: #596579; font-size: 13px; }
@@ -106,7 +187,27 @@
     .x-layout-background-row { display: grid; grid-template-columns: 92px 1fr; align-items: center; gap: 12px; color: #596579; font-size: 13px; }
     .x-layout-preset { width: 100%; height: 34px; border: 1px solid #d9e1ee; border-radius: 7px; padding: 0 9px; background: #fff; color: #363636; }
     .x-layout-preview { height: 48px; border-radius: 8px; background: linear-gradient(120deg, var(--x-preview-1), var(--x-preview-2), var(--x-preview-3), var(--x-preview-4)); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .5); }
-    .x-layout-modal .modal-card-foot { justify-content: flex-end; gap: 8px; padding: 14px 20px; }
+    .x-layout-keyword-row { display: grid; grid-template-columns: 92px 1fr; align-items: start; gap: 12px; color: #596579; font-size: 13px; }
+    .x-layout-keyword-content { display: grid; gap: 8px; }
+    .x-layout-keyword-chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 25px; }
+    .x-layout-keyword-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 3px 5px 3px 8px; border-radius: 999px; background: #e9f1ff; color: #2859a5; line-height: 18px; }
+    .x-layout-keyword-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .x-layout-keyword-chip button { width: 17px; height: 17px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; font-size: 16px; line-height: 15px; }
+    .x-layout-keyword-chip button:hover { background: rgb(40 89 165 / .14); }
+    .x-layout-keyword-entry { display: flex; gap: 6px; }
+    .x-layout-keyword-entry textarea { flex: 1 1 auto; width: 100%; min-width: 0; height: 32px; resize: vertical; border: 1px solid #d9e1ee; border-radius: 7px; padding: 6px 9px; outline-color: #3273dc; }
+    .x-layout-keyword-entry .button { flex: 0 0 auto; height: 32px; }
+    .x-layout-keyword-hint { margin: 0; color: #8792a5; font-size: 12px; line-height: 1.45; }
+    .x-layout-score-number { display: grid; grid-template-columns: 92px 1fr; align-items: center; gap: 12px; color: #596579; font-size: 13px; }
+    .x-layout-score-number input { width: 100%; height: 32px; border: 1px solid #d9e1ee; border-radius: 7px; padding: 0 9px; outline-color: #3273dc; }
+    .x-layout-score-color { display: grid; grid-template-columns: 92px 44px 1fr; align-items: center; gap: 12px; color: #596579; font-size: 13px; }
+    .x-layout-score-color input { width: 40px; height: 28px; padding: 1px; border: 1px solid #d9e1ee; border-radius: 6px; background: #fff; cursor: pointer; }
+    .x-layout-score-color code { color: #53627a; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .x-layout-score-check { display: flex; align-items: center; gap: 8px; color: #596579; font-size: 13px; cursor: pointer; }
+    .x-layout-score-check input { accent-color: #3273dc; }
+    .x-layout-score-subtitle { margin: 4px 0 -3px; color: #52637d; font-size: 12px; font-weight: 700; }
+    .x-layout-score-actions { display: flex; justify-content: flex-end; }
+    .x-layout-modal .modal-card-foot { flex: 0 0 auto; justify-content: flex-end; gap: 8px; padding: 14px 20px; }
   `);
 
   const applyConfig = (config) => {
@@ -134,14 +235,32 @@
       <output>${value}${suffix}</output>
     </label>`;
 
-  const renderModal = () => {
+  const scoreNumberField = ({ id, label, value }) => `
+    <label class="x-layout-score-number" for="${id}"><span>${label}</span><input id="${id}" type="number" min="0" max="10000000" step="1" value="${value}"></label>`;
+
+  const scoreColorField = ({ id, label, value }) => `
+    <label class="x-layout-score-color" for="${id}"><span>${label}</span><input id="${id}" type="color" value="${value}"><code>${value}</code></label>`;
+
+  const keywordField = ({ kind, label, placeholder }) => `
+    <div class="x-layout-keyword-row" data-keyword-kind="${kind}">
+      <span>${label}</span>
+      <div class="x-layout-keyword-content">
+        <div class="x-layout-keyword-chips" data-keyword-chips="${kind}"></div>
+        <div class="x-layout-keyword-entry">
+          <textarea rows="1" data-keyword-input="${kind}" placeholder="${placeholder}"></textarea>
+          <button class="button is-small" type="button" data-keyword-add="${kind}">添加</button>
+        </div>
+      </div>
+    </div>`;
+
+  const renderModal = (scoreConfig) => {
     const modal = document.createElement("div");
     modal.className = "modal x-layout-modal";
     modal.innerHTML = `
       <div class="modal-background" data-layout-close></div>
       <div class="modal-card">
         <header class="modal-card-head">
-          <p class="modal-card-title">\u9875\u9762\u5e03\u5c40\u4e0e\u80cc\u666f</p>
+          <p class="modal-card-title">全局设置</p>
           <button class="delete" type="button" aria-label="\u5173\u95ed" data-layout-close></button>
         </header>
         <section class="modal-card-body">
@@ -158,6 +277,35 @@
             <label class="x-layout-background-row" for="x-layout-background-preset"><span>\u6e10\u53d8\u914d\u8272</span><select id="x-layout-background-preset" class="x-layout-preset">${Object.entries(BACKGROUND_PRESETS).map(([id, preset]) => `<option value="${id}" ${id === config.backgroundPreset ? "selected" : ""}>${preset.name}</option>`).join("")}</select></label>
             ${field({ id: "x-layout-background-speed", label: "\u52a8\u6001\u901f\u7387", min: 0, max: 1, step: 0.05, suffix: "\u00d7", value: config.backgroundSpeed })}
             <div class="x-layout-preview" aria-label="\u5f53\u524d\u6e10\u53d8\u914d\u8272\u9884\u89c8"></div>
+          </div>
+          <div class="x-layout-section">
+            <p class="x-layout-section-title">\u8bc4\u5206\u7b5b\u9009</p>
+            <p class="x-layout-score-subtitle">\u4f4e\u5206 / \u6837\u672c\u89c4\u5219</p>
+            ${field({ id: "x-score-low-rating", label: "\u4f4e\u5206\u9608\u503c", min: 0, max: 5, step: 0.1, suffix: "\u5206", value: scoreConfig.lowRating })}
+            ${field({ id: "x-score-weak-rating", label: "\u6837\u672c\u9608\u503c", min: 0, max: 5, step: 0.1, suffix: "\u5206", value: scoreConfig.weakRating })}
+            ${scoreNumberField({ id: "x-score-low-votes", label: "\u4f4e\u5206\u7968\u6570", value: scoreConfig.lowVotes })}
+            ${scoreNumberField({ id: "x-score-weak-votes", label: "\u6837\u672c\u7968\u6570", value: scoreConfig.weakVotes })}
+            ${field({ id: "x-score-low-visibility", label: "\u4f4e\u5206\u53ef\u89c1\u5ea6", min: 0, max: 100, step: 1, suffix: "%", value: scoreConfig.lowVisibility })}
+            ${field({ id: "x-score-weak-visibility", label: "\u6837\u672c\u53ef\u89c1\u5ea6", min: 0, max: 100, step: 1, suffix: "%", value: scoreConfig.weakVisibility })}
+            <label class="x-layout-score-check"><input id="x-score-western-bypass" type="checkbox" ${scoreConfig.westernBypass ? "checked" : ""}>\u897f\u65b9\u65e5\u671f\u7f16\u53f7\u8df3\u8fc7\u4f4e\u5206\u7b5b\u9009</label>
+            <p class="x-layout-score-subtitle">\u666e\u901a\u9ad8\u4eae</p>
+            ${field({ id: "x-score-highlight-rating", label: "\u9ad8\u4eae\u8bc4\u5206", min: 0, max: 5, step: 0.1, suffix: "\u5206", value: scoreConfig.highlightRating })}
+            ${scoreNumberField({ id: "x-score-highlight-votes", label: "\u9ad8\u4eae\u7968\u6570", value: scoreConfig.highlightVotes })}
+            ${scoreColorField({ id: "x-score-highlight-start", label: "\u666e\u901a\u9ad8\u4eae\u8d77\u8272", value: scoreConfig.highlightStart })}
+            ${scoreColorField({ id: "x-score-highlight-end", label: "\u666e\u901a\u9ad8\u4eae\u6b62\u8272", value: scoreConfig.highlightEnd })}
+            <p class="x-layout-score-subtitle">\u9876\u7ea7\u9ad8\u4eae</p>
+            ${field({ id: "x-score-top-rating", label: "\u9876\u7ea7\u8bc4\u5206", min: 0, max: 5, step: 0.1, suffix: "\u5206", value: scoreConfig.topRating })}
+            ${scoreNumberField({ id: "x-score-top-votes", label: "\u9876\u7ea7\u7968\u6570", value: scoreConfig.topVotes })}
+            ${scoreColorField({ id: "x-score-top-start", label: "\u9876\u7ea7\u9ad8\u4eae\u8d77\u8272", value: scoreConfig.topStart })}
+            ${scoreColorField({ id: "x-score-top-end", label: "\u9876\u7ea7\u9ad8\u4eae\u6b62\u8272", value: scoreConfig.topEnd })}
+            <p class="x-layout-keyword-hint">\u4f4e\u8d28\uff1a\u8bc4\u5206 &lt; \u4f4e\u5206\u9608\u503c\uff0c\u6216\uff08\u8bc4\u5206 &lt;= \u6837\u672c\u9608\u503c\u4e14\u7968\u6570 &lt; \u4f4e\u5206\u7968\u6570\uff09\uff1b\u6837\u672c\uff1a\u8bc4\u5206 &gt;= \u6837\u672c\u9608\u503c\u4e14\u7968\u6570 &lt; \u6837\u672c\u7968\u6570\uff1b\u9ad8\u4eae\uff1a\u8bc4\u5206 &gt; \u9ad8\u4eae\u8bc4\u5206\u4e14\u7968\u6570 &gt; \u9ad8\u4eae\u7968\u6570\uff1b\u9876\u7ea7\u89c4\u5219\u4f18\u5148\u3002</p>
+            <div class="x-layout-score-actions"><button class="button is-small is-light" type="button" data-score-reset>\u91cd\u7f6e\u8bc4\u5206\u89c4\u5219</button></div>
+          </div>
+          <div class="x-layout-section">
+            <p class="x-layout-section-title">关键词过滤</p>
+            ${keywordField({ kind: "titleKeywords", label: "标题关键词", placeholder: "输入后按 Enter、逗号或换行添加" })}
+            ${keywordField({ kind: "tagKeywords", label: "标签关键词", placeholder: "输入后按 Enter、逗号或换行添加" })}
+            <p class="x-layout-keyword-hint">支持批量粘贴；添加或删除关键词后会立即重新筛选当前卡片。</p>
           </div>
         </section>
         <footer class="modal-card-foot">
@@ -181,7 +329,8 @@
     triggerWrap.append(trigger);
     navList.append(triggerWrap);
 
-    const modal = renderModal();
+    let scoreConfig = readScoreConfig();
+    const modal = renderModal(scoreConfig);
     const inputs = {
       pageWidth: modal.querySelector("#x-layout-page-width"),
       detailWidth: modal.querySelector("#x-layout-detail-width"),
@@ -192,6 +341,54 @@
       backgroundSpeed: modal.querySelector("#x-layout-background-speed"),
     };
     const preview = modal.querySelector(".x-layout-preview");
+    const scoreInputs = {
+      lowRating: modal.querySelector("#x-score-low-rating"), weakRating: modal.querySelector("#x-score-weak-rating"),
+      lowVotes: modal.querySelector("#x-score-low-votes"), weakVotes: modal.querySelector("#x-score-weak-votes"),
+      highlightRating: modal.querySelector("#x-score-highlight-rating"), highlightVotes: modal.querySelector("#x-score-highlight-votes"),
+      highlightStart: modal.querySelector("#x-score-highlight-start"), highlightEnd: modal.querySelector("#x-score-highlight-end"),
+      topRating: modal.querySelector("#x-score-top-rating"), topVotes: modal.querySelector("#x-score-top-votes"),
+      topStart: modal.querySelector("#x-score-top-start"), topEnd: modal.querySelector("#x-score-top-end"),
+      lowVisibility: modal.querySelector("#x-score-low-visibility"), weakVisibility: modal.querySelector("#x-score-weak-visibility"),
+      westernBypass: modal.querySelector("#x-score-western-bypass"),
+    };
+    const keywordInputs = {
+      titleKeywords: modal.querySelector('[data-keyword-input="titleKeywords"]'),
+      tagKeywords: modal.querySelector('[data-keyword-input="tagKeywords"]'),
+    };
+    let keywordConfig = readKeywordConfig();
+
+    const renderKeywordChips = () => {
+      Object.entries(keywordInputs).forEach(([kind, input]) => {
+        const chips = modal.querySelector(`[data-keyword-chips="${kind}"]`);
+        chips.replaceChildren(...keywordConfig[kind].map((keyword) => {
+          const chip = document.createElement("span");
+          chip.className = "x-layout-keyword-chip";
+          const text = document.createElement("span");
+          text.textContent = keyword;
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.title = `删除 ${keyword}`;
+          remove.setAttribute("aria-label", `删除 ${keyword}`);
+          remove.dataset.keywordRemove = keyword;
+          remove.textContent = "×";
+          chip.append(text, remove);
+          return chip;
+        }));
+        input.value = "";
+      });
+    };
+
+    const setKeywords = (kind, values) => {
+      keywordConfig = writeKeywordConfig({ ...keywordConfig, [kind]: values });
+      renderKeywordChips();
+    };
+
+    const commitKeywordInput = (kind) => {
+      const input = keywordInputs[kind];
+      const additions = normalizeKeywords(input.value);
+      if (!additions.length) return;
+      setKeywords(kind, [...keywordConfig[kind], ...additions]);
+    };
 
     const syncOutputs = () => {
       Object.values(inputs).filter((input) => input.type === "range").forEach((input) => {
@@ -223,7 +420,39 @@
       syncOutputs();
     };
 
+    const syncScoreOutputs = () => {
+      [[scoreInputs.lowRating, "\u5206"], [scoreInputs.weakRating, "\u5206"], [scoreInputs.highlightRating, "\u5206"], [scoreInputs.topRating, "\u5206"], [scoreInputs.lowVisibility, "%"], [scoreInputs.weakVisibility, "%"]].forEach(([input, suffix]) => {
+        input.nextElementSibling.textContent = `${input.value}${suffix}`;
+      });
+      ["highlightStart", "highlightEnd", "topStart", "topEnd"].forEach((key) => {
+        scoreInputs[key].nextElementSibling.textContent = scoreInputs[key].value.toLowerCase();
+      });
+    };
+    const readScoreInputs = () => normalizeScoreConfig({
+      lowRating: scoreInputs.lowRating.value, weakRating: scoreInputs.weakRating.value,
+      lowVotes: scoreInputs.lowVotes.value, weakVotes: scoreInputs.weakVotes.value,
+      highlightRating: scoreInputs.highlightRating.value, highlightVotes: scoreInputs.highlightVotes.value,
+      highlightStart: scoreInputs.highlightStart.value, highlightEnd: scoreInputs.highlightEnd.value,
+      topRating: scoreInputs.topRating.value, topVotes: scoreInputs.topVotes.value,
+      topStart: scoreInputs.topStart.value, topEnd: scoreInputs.topEnd.value,
+      lowVisibility: scoreInputs.lowVisibility.value, weakVisibility: scoreInputs.weakVisibility.value,
+      westernBypass: scoreInputs.westernBypass.checked,
+    });
+    const setScoreInputs = (next) => {
+      Object.entries(next).forEach(([key, value]) => {
+        if (key === "westernBypass") scoreInputs[key].checked = value;
+        else scoreInputs[key].value = value;
+      });
+      syncScoreOutputs();
+    };
+    const previewScoreConfig = () => {
+      scoreConfig = writeScoreConfig(readScoreInputs());
+      setScoreInputs(scoreConfig);
+    };
+
     syncOutputs();
+    syncScoreOutputs();
+    renderKeywordChips();
 
     Object.values(inputs).forEach((input) => input.addEventListener("input", () => {
       syncOutputs();
@@ -233,20 +462,61 @@
       syncOutputs();
       applyConfig(readInputs());
     });
+    Object.values(scoreInputs).forEach((input) => {
+      input.addEventListener(input.type === "number" ? "change" : "input", previewScoreConfig);
+    });
 
-    trigger.addEventListener("click", () => modal.classList.add("is-active"));
+    Object.entries(keywordInputs).forEach(([kind, input]) => {
+      input.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" || event.isComposing) return;
+        event.preventDefault();
+        commitKeywordInput(kind);
+      });
+      input.addEventListener("input", () => {
+        if (/[,，\r\n]/.test(input.value)) commitKeywordInput(kind);
+      });
+    });
+    modal.addEventListener("click", (event) => {
+      const addButton = event.target.closest("[data-keyword-add]");
+      if (addButton) commitKeywordInput(addButton.dataset.keywordAdd);
+      const removeButton = event.target.closest("[data-keyword-remove]");
+      if (removeButton) {
+        const row = removeButton.closest("[data-keyword-kind]");
+        const kind = row?.dataset.keywordKind;
+        if (kind) setKeywords(kind, keywordConfig[kind].filter((keyword) => keyword !== removeButton.dataset.keywordRemove));
+      }
+      if (event.target.closest("[data-score-reset]")) {
+        scoreConfig = writeScoreConfig(DEFAULT_SCORE_CONFIG);
+        setScoreInputs(scoreConfig);
+      }
+    });
+
+    trigger.addEventListener("click", () => {
+      keywordConfig = readKeywordConfig();
+      scoreConfig = readScoreConfig();
+      renderKeywordChips();
+      setScoreInputs(scoreConfig);
+      modal.classList.add("is-active");
+    });
     modal.addEventListener("click", (event) => {
       if (event.target.closest("[data-layout-close]")) modal.classList.remove("is-active");
       if (event.target.closest("[data-layout-save]")) {
+        Object.keys(keywordInputs).forEach(commitKeywordInput);
         config = readInputs();
         writeConfig(config);
         applyConfig(config);
+        scoreConfig = writeScoreConfig(readScoreInputs());
+        setScoreInputs(scoreConfig);
         modal.classList.remove("is-active");
       }
       if (event.target.closest("[data-layout-reset]")) {
         config = { ...DEFAULT_CONFIG };
         writeConfig(config);
+        keywordConfig = writeKeywordConfig(DEFAULT_KEYWORD_CONFIG);
+        scoreConfig = writeScoreConfig(DEFAULT_SCORE_CONFIG);
+        renderKeywordChips();
         setInputs(config);
+        setScoreInputs(scoreConfig);
         applyConfig(config);
       }
     });

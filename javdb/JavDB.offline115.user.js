@@ -128,7 +128,8 @@ const setConfig = async (e) => {
 };
 
 const TARGET_CLASS = "x-offline";
-const CRACK_REG = /无码破解|無碼破解|流出|破解|解密版|uncensored|restored|破[\u4E00-\u9FC6]版|[-_\s]+(cu|u|uc)(?![a-z])/i;
+const CRACK_REG = Magnet.crackReg;
+const LEAK_REG = Magnet.leakReg;
 const LOAD_CLASS = "is-loading";
 
 const MATCH_API = "reMatch";
@@ -148,6 +149,10 @@ const escapeHtml = (value = "") => String(value)
   .replaceAll('"', "&quot;");
 
 const normalizeText = (value = "") => String(value).replace(/\[[^\]]+\]/g, "").replace(/\s+/g, " ").trim();
+
+const decodeMagnetUrl = (value = "") => {
+  try { return decodeURIComponent(value); } catch (_) { return value; }
+};
 
 const getActorPanel = (dom = document) => {
   return [...dom.querySelectorAll(".movie-panel-info > .panel-block")].find((item) => item.querySelector("strong")?.textContent.trim() === "演員:");
@@ -365,10 +370,15 @@ const findAction = ({ index, idx }, actions) => {
 const parseMagnet = (node) => {
   const name = node.querySelector(".name")?.textContent.trim() ?? "";
   const meta = node.querySelector(".meta")?.textContent.trim() ?? "";
+  const href = node.querySelector(".magnet-name a")?.href ?? "";
+  const tagText = [...node.querySelectorAll(".tags .tag")].map((tag) => tag.textContent.trim()).join(" ");
+  // JavDB can place the signal in a magnet tag, while other sources put it in
+  // a display name or the magnet's dn parameter.  Treat all three as inputs.
+  const sourceText = [name, href, decodeMagnetUrl(href), tagText].join(" ");
   return {
-    url: node.querySelector(".magnet-name a")?.href?.split("&")[0].toLowerCase(),
-    // “无码/無碼”本身是番号属性，不是破解标记；仅识别明确的破解关键词。
-    crack: CRACK_REG.test(name),
+    url: href.split("&")[0].toLowerCase(),
+    crack: CRACK_REG.test(sourceText),
+    leaked: LEAK_REG.test(sourceText),
     zh: !!node.querySelector(".tag.is-warning") || Magnet.zhReg.test(name),
     size: transToByte(meta.split(",")[0]),
     meta,

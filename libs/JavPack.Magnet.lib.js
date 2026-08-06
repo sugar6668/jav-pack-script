@@ -1,7 +1,10 @@
 // eslint-disable-next-line no-unused-vars, unused-imports/no-unused-vars
 class Magnet {
   static zhReg = /中文|中字|字幕|\[[a-z]?hdc[a-z]?\]|[-_\s]+(uc|c|ch|cu|zh)(?![a-z])/i;
-  static crackReg = /无码|無碼|流出|破解|解密版|uncensored|restored|破[\u4E00-\u9FC6]版|[-_\s]+(cu|u|uc)(?![a-z])/i;
+  // Keep release-state signals independent: a page's uncensored classification
+  // and a leaked release are not crack indicators.
+  static crackReg = /破解|解密版|restored|破[\u4E00-\u9FC6]版/i;
+  static leakReg = /uncensored[\s._-]*leaked|\buncen\b|無碼流出|流出/i;
 
   static useTransByte() {
     const rules = [

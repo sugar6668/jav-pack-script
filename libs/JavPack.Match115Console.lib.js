@@ -7,7 +7,8 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
   static subtitleFileReg = /\.(srt|ass|ssa|vtt|sub)$/i;
   static subtitleDetectionVersion = 2;
   static archiveAttachmentFileReg = /\.(srt|ass|ssa|vtt|sub|nfo)$/i;
-  static crackReg = /无码破解|無碼破解|流出|破解|解密版|uncensored|restored|破[\u4E00-\u9FC6]版|[-_\s]+(cu|u|uc)(?![a-z])/i;
+  static crackReg = /破解|解密版|restored|破[\u4E00-\u9FC6]版/i;
+  static leakReg = /uncensored[\s._-]*leaked|\buncen\b|無碼流出|流出/i;
 
   static escapeHtml(value = "") {
     return String(value)
@@ -217,12 +218,14 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
   static buildRename(details = {}, files = []) {
     const code = this.sanitizeName(details.code || "未命名");
     const title = this.sanitizeName(details.title || "");
-    const hasZh = files.some((file) => this.zhReg.test(file.n));
-    const hasCrack = files.some((file) => this.crackReg.test(file.n));
+    const names = files.map((file) => file.n || file.name || file.file_name || "");
+    const hasZh = names.some((name) => this.zhReg.test(name));
+    const hasCrack = names.some((name) => this.crackReg.test(name));
+    const hasLeak = names.some((name) => this.leakReg.test(name));
     // 无码标签仅由当前 JavDB 番号的页面属性决定，不能由资源文件名中的 -U、无码、破解等字样推断。
     const isUncensored = Boolean(details.isUncensored);
-    const tags = [hasZh && "[中文]", hasCrack && "[破解]", isUncensored && "[无码]"].filter(Boolean).join("");
-    // 标签统一位于番号和作品名之间，例如：LUXU-123 [中文][破解][无码] 作品名。
+    const tags = [hasZh && "[中文]", hasCrack && "[破解]", hasLeak && "[流出]", isUncensored && "[无码]"].filter(Boolean).join("");
+    // 标签统一位于番号和作品名之间，例如：LUXU-123 [中文][破解][流出][无码] 作品名。
     return [code, tags, title].filter(Boolean).join(" ");
   }
 

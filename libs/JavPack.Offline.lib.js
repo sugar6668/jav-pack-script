@@ -6,7 +6,7 @@ class Offline {
 
   static defaultColor = "is-info";
 
-  static defaultRename = `\${code} \${zh}\${crack}\${uncensored} \${title}`;
+  static defaultRename = `\${code} \${zh}\${crack}\${leaked}\${uncensored} \${title}`;
 
   static defaultOptions = {
     tags: ["genres", "actors"],
@@ -33,6 +33,7 @@ class Offline {
     sep: "-",
     zh: "[中文]",
     crack: "[破解]",
+    leaked: "[流出]",
     uncensored: "[无码]",
   };
 
@@ -60,6 +61,7 @@ class Offline {
           rename = rename.replaceAll(`\${sep}`, "$sep");
           rename = rename.replaceAll(`\${zh}`, "$zh");
           rename = rename.replaceAll(`\${crack}`, "$crack");
+          rename = rename.replaceAll(`\${leaked}`, "$leaked");
           rename = rename.replaceAll(`\${uncensored}`, "$uncensored");
           if (!rename.includes(`\${code}`)) rename = `\${code} ${rename}`;
         }
