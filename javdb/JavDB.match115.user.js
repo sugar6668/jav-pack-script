@@ -382,9 +382,12 @@ const getPageDetails = (dom = document) => {
         updated.cid = changes.cid || source.cid;
         updated.realPath = changes.realPath || source.realPath;
         updated.hasCover = Boolean(changes.hasCover ?? source.hasCover);
-        ["n", "s", "ico", "pc"].forEach((key) => {
+        ["n", "ico", "pc"].forEach((key) => {
           if (target?.[key] !== undefined) updated[key] = target[key];
         });
+        // `s` is the human-readable display size (for example, 5.09GB).
+        // 115 returns its file size as raw bytes here, which belongs in `bytes`.
+        if (target?.s !== undefined) updated.bytes = Number(target.s) || updated.bytes;
       } else if (operation === "rename" && String(source.fid) === String(item.fid)) {
         const ext = changes.file?.ico || source.ico;
         if (changes.rename && ext) updated.n = `${changes.rename}.${ext}`;

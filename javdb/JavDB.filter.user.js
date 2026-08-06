@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.filter
 // @namespace       JavDB.filter@blc
-// @version         0.0.18
+// @version         0.0.20
 // @author          blc
 // @description     评分筛选与性癖净化
 // @match           https://javdb.com/*
@@ -46,6 +46,12 @@
   const WESTERN_CODE_PATTERN = /[A-Za-z]+[\.\s-]+(20\d{2}|\d{2})[.-]\d{2}[.-]\d{2}/;
   const SCORE_BACKGROUND_PROPERTIES = ["background", "background-image", "background-color", "background-position", "background-size", "background-repeat", "background-origin", "background-clip", "background-attachment"];
   const scoreCardBackgrounds = new WeakMap();
+  const isStylableCardBox = (node) => Boolean(
+    node?.style
+    && typeof node.style.getPropertyValue === "function"
+    && typeof node.style.getPropertyPriority === "function"
+    && typeof node.style.removeProperty === "function",
+  );
 
   const clampScoreNumber = (value, min, max, fallback, precision = 0) => {
     if (value == null || typeof value === "boolean" || (typeof value === "string" && !value.trim())) return fallback;
@@ -199,6 +205,7 @@
   };
 
   const restoreScoreBackground = (cardBox) => {
+    if (!isStylableCardBox(cardBox)) return;
     const original = scoreCardBackgrounds.get(cardBox);
     if (!original) return;
     SCORE_BACKGROUND_PROPERTIES.forEach((property) => cardBox.style.removeProperty(property));
@@ -209,8 +216,9 @@
 
   const applyScoreFilter = (item, details) => {
     const cardBox = item.children?.[0];
+    const canStyleCardBox = isStylableCardBox(cardBox);
     item.classList.remove("x-score-mask-low", "x-score-mask-weak", "x-score-filtered");
-    if (cardBox) {
+    if (canStyleCardBox) {
       if (!scoreCardBackgrounds.has(cardBox)) {
         scoreCardBackgrounds.set(cardBox, SCORE_BACKGROUND_PROPERTIES.map((property) => ({
           property,
@@ -234,9 +242,9 @@
       }
     }
 
-    if (rating > scoreConfig.topRating && votes > scoreConfig.topVotes && cardBox) {
+    if (rating > scoreConfig.topRating && votes > scoreConfig.topVotes && canStyleCardBox) {
       cardBox.style.background = `linear-gradient(${scoreConfig.topStart} 50%, ${scoreConfig.topEnd} 100%)`;
-    } else if (rating > scoreConfig.highlightRating && votes > scoreConfig.highlightVotes && cardBox) {
+    } else if (rating > scoreConfig.highlightRating && votes > scoreConfig.highlightVotes && canStyleCardBox) {
       cardBox.style.background = `linear-gradient(${scoreConfig.highlightStart} 50%, ${scoreConfig.highlightEnd} 100%)`;
     }
   };
@@ -254,16 +262,37 @@
 
   const processCards = (list) => {
     [...list].forEach((item) => {
-      if (!(item instanceof Element)) return;
-      const details = parseCard(item);
-      if (applyPurify(item, details)) return;
-      applyScoreFilter(item, details);
+      try {
+        if (!(item instanceof Element)) return;
+        const details = parseCard(item);
+        if (applyPurify(item, details)) return;
+        applyScoreFilter(item, details);
+      } catch (error) {
+        // A malformed card must not break JavDB.scroll's own load-more cycle.
+        console.warn("[JavDB.filter] skip card", error);
+      }
     });
   };
 
   const refreshKeywordFilteredCards = () => {
     refreshKeywordConfig();
     processCards(document.querySelectorAll(".movie-list .item"));
+  };
+
+  const observeIncomingMovieCards = () => {
+    const movieList = document.querySelector(".movie-list");
+    if (!movieList) return;
+
+    new MutationObserver((mutations) => {
+      const incoming = mutations.flatMap(({ addedNodes }) => [...addedNodes].flatMap((node) => {
+        if (!(node instanceof Element)) return [];
+        if (node.matches(".item")) return [node];
+        return [...node.querySelectorAll(".item")];
+      }));
+      if (!incoming.length) return;
+      processCards(incoming);
+      queueMoreActorWorksIfNeeded();
+    }).observe(movieList, { childList: true });
   };
 
   const applyScoreMaskVisibility = (next = scoreConfig) => {
@@ -452,15 +481,12 @@
   }
 
   processCards(document.querySelectorAll(".movie-list .item"));
+  observeIncomingMovieCards();
   window.addEventListener(KEYWORD_CONFIG_EVENT, refreshKeywordFilteredCards);
   window.addEventListener(SCORE_CONFIG_EVENT, () => refreshScoreConfig());
   window.addEventListener("storage", (event) => {
     if (event.key === KEYWORD_CONFIG_STORAGE_KEY) refreshKeywordFilteredCards();
     if (event.key === SCORE_CONFIG_STORAGE_KEY) refreshScoreConfig();
-  });
-  window.addEventListener("JavDB.scroll", ({ detail }) => {
-    processCards(detail || []);
-    queueMoreActorWorksIfNeeded();
   });
   if (isActorWorksPage()) {
     new MutationObserver((mutations) => {
