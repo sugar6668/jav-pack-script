@@ -351,6 +351,11 @@ class Req115 extends Drive115 {
 
   static queueMutation(label, task, { onState } = {}) {
     const coordinator = this.getMutationCoordinator();
+    if (coordinator.paused) {
+      const error = new Error(coordinator.paused.reason);
+      onState?.({ state: "paused", label, queued: coordinator.queue.length, running: coordinator.running, paused: coordinator.paused });
+      return Promise.reject(error);
+    }
     return new Promise((resolve, reject) => {
       const entry = {
         label,
@@ -370,6 +375,8 @@ class Req115 extends Drive115 {
     const coordinator = this.getMutationCoordinator();
     if (coordinator.paused) return;
     coordinator.paused = { reason, at: Date.now() };
+    const error = new Error(reason);
+    coordinator.queue.splice(0).forEach((entry) => entry.reject(error));
     try {
       window.Grant?.notify?.({ status: "warn", icon: "warning", msg: `115 操作已暂停：${reason}` });
     } catch (_) {}

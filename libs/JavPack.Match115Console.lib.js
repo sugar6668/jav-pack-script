@@ -439,7 +439,9 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
   static async deleteMatchedNow({ req115, item, action }) {
     const file = this.normalizeFile(item);
     const videos = this.getBundleMembers(item);
-    return req115.rbDelete(action === "delf" ? [file.cid] : videos.map((video) => video.fid), file.cid);
+    const response = await req115.rbDelete(action === "delf" ? [file.cid] : videos.map((video) => video.fid), file.cid);
+    if (!response || response.state === false) throw this.requestError("删除失败", response);
+    return response;
   }
 
   static bindActions(root, options) {
@@ -518,6 +520,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         onState: ({ state, queued }) => {
           btn.dataset.queueState = state;
           if (state === "queued") btn.textContent = `排队中${queued ? ` (${queued})` : ""}`;
+          if (state === "paused") btn.textContent = "操作已暂停";
           if (state === "running" && !useSpinner) btn.textContent = "执行中..";
         },
       };
