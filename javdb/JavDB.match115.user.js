@@ -60,6 +60,7 @@ const initAutoMatchToggle = () => {
   if (!wrap?.parentElement) return false;
 
   const triggerWrap = wrap.tagName === "LI" ? document.createElement("li") : document.createElement("div");
+  triggerWrap.className = "x-auto-match-nav";
   const trigger = document.createElement("a");
   const dot = document.createElement("span");
   trigger.href = VOID;

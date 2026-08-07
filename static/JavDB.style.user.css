@@ -203,12 +203,53 @@ body:has(.x-load) #footer,
 /* Keep custom top-level entries on the same subdued hover treatment as the
  * original navigation instead of Bulma's near-white navbar-item background. */
 .navbar.is-black .navbar-start :is(
-  .x-rankings-override-nav,
-  .x-rankings-override-trigger,
   .x-layout-trigger,
   .x-auto-match-trigger
-):is(:hover, :focus, :focus-within) {
+):is(:hover, :focus, :focus-within),
+.navbar.is-black .navbar-start .x-rankings-override-nav:is(:hover, :focus, :focus-within) {
   background-color: rgb(var(--x-rgb) / 9%) !important;
+}
+
+/* Rankings has a navbar-item wrapper plus its own link.  The wrapper owns
+ * the hover fill; keep the inner link transparent to prevent a second block. */
+.navbar.is-black .navbar-start .x-rankings-override-nav > .x-rankings-override-trigger:is(:hover, :focus, :focus-within) {
+  background-color: transparent !important;
+}
+
+.navbar.is-black .navbar-start :is(.x-rankings-override-nav, .x-auto-match-nav) {
+  display: flex;
+  align-items: stretch;
+}
+
+.navbar.is-black .navbar-start :is(.x-rankings-override-trigger, .x-auto-match-trigger) {
+  height: 100%;
+}
+
+.x-auto-match-trigger {
+  display: inline-flex !important;
+  align-items: center;
+  height: 100%;
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 1.5;
+  cursor: pointer;
+  gap: .42rem;
+}
+
+.x-auto-match-indicator {
+  width: .52rem;
+  height: .52rem;
+  border-radius: 50%;
+  background: #27e36a;
+  box-shadow: 0 0 .3rem #27e36a, 0 0 .72rem rgb(39 227 106 / 82%);
+  opacity: 0;
+  transform: scale(.45);
+  transition: opacity .16s ease, transform .16s ease;
+}
+
+.x-auto-match-trigger.is-active .x-auto-match-indicator {
+  opacity: 1;
+  transform: scale(1);
 }
 
 .search-bar-container {
@@ -1958,29 +1999,6 @@ br + .title {
     display: none;
   }
 }
-
-.x-auto-match-trigger {
-  display: inline-flex !important;
-  align-items: center;
-  gap: .42rem;
-}
-
-.x-auto-match-indicator {
-  width: .52rem;
-  height: .52rem;
-  border-radius: 50%;
-  background: #27e36a;
-  box-shadow: 0 0 .3rem #27e36a, 0 0 .72rem rgb(39 227 106 / 82%);
-  opacity: 0;
-  transform: scale(.45);
-  transition: opacity .16s ease, transform .16s ease;
-}
-
-.x-auto-match-trigger.is-active .x-auto-match-indicator {
-  opacity: 1;
-  transform: scale(1);
-}
-
 
 .x-magnet-preview { color: #fff; background: #7957d5; border-color: #7957d5; }
 .x-magnet-preview:hover, .x-magnet-preview:focus { color: #fff; background: #6847c4; border-color: #6847c4; }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.rankings.override
 // @namespace       JavDB.rankings.override.local
-// @version         0.1.9
+// @version         0.1.10
 // @description     添加独立榜单入口，以默认样式展示榜单，并支持 match115 匹配
 // @match           https://javdb.com/*
 // @icon            https://javdb.com/favicon.ico
@@ -759,7 +759,9 @@ function insertRankingsEntry() {
   }
 
   const wrap = document.createElement("div");
-  wrap.className = "navbar-item x-rankings-override-nav";
+  // The trigger is already a navbar item.  Keeping its wrapper plain avoids
+  // nested navbar-item hover/padding boxes.
+  wrap.className = "x-rankings-override-nav";
 
   const trigger = document.createElement("a");
   trigger.className = "navbar-item x-rankings-override-trigger";
