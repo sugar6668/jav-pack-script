@@ -6,6 +6,9 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
 
   static subtitleFileReg = /\.(srt|ass|ssa|vtt|sub)$/i;
   static subtitleDetectionVersion = 2;
+  static metadataCache = new Map();
+  static metadataPending = new Map();
+  static metadataCacheTtl = 5 * 60 * 1000;
   static archiveAttachmentFileReg = /\.(srt|ass|ssa|vtt|sub|nfo)$/i;
   static crackReg = /破解|解密版|restored|破[\u4E00-\u9FC6]版/i;
   static leakReg = /uncensored[\s._-]*leaked|\buncen\b|無碼流出|流出/i;
@@ -103,6 +106,24 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     };
   }
 
+  static async getMetadata(req115, cid) {
+    const key = String(cid || "");
+    if (!key) return this.resolveMetadata(req115, cid);
+
+    const cached = this.metadataCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    if (this.metadataPending.has(key)) return this.metadataPending.get(key);
+
+    const pending = this.resolveMetadata(req115, cid)
+      .then((value) => {
+        this.metadataCache.set(key, { value, expiresAt: Date.now() + this.metadataCacheTtl });
+        return value;
+      })
+      .finally(() => this.metadataPending.delete(key));
+    this.metadataPending.set(key, pending);
+    return pending;
+  }
+
   static subtitleStem(name = "") {
     // Keep only subtitles belonging to the selected video.  A collection
     // directory can contain subtitles for several titles, all of which share
@@ -185,7 +206,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     // Metadata requests used to fan out with Promise.all.  A fresh card may
     // contain several folders, so resolve them one by one instead.
     for (const cid of cids) {
-      const metadataItem = await this.resolveMetadata(req115, cid)
+      const metadataItem = await this.getMetadata(req115, cid)
         .catch(() => ({ realPath: "", hasCover: false, subtitleFiles: [] }));
       metadata.set(cid, metadataItem);
     }

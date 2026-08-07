@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.20
+// @version         0.0.22
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -771,22 +771,27 @@ const getPageDetails = (dom = document) => {
       if (!wait[searchKey]?.length) return match();
       loading = true;
 
+      let completion;
       try {
         const { data = [] } = await Req115.filesSearchAllVideos(searchKey);
         const pendingItems = wait[searchKey] || [];
         const matchedData = data.filter((item) => pendingItems.some(({ regex }) => regex.test(item.n)));
         const sources = extractData(matchedData);
-        await over(searchKey, sources, true);
+        completion = over(searchKey, sources, true);
       } catch (err) {
-        await over(searchKey);
+        completion = over(searchKey);
         Util.print(err?.message);
       }
 
       loading = false;
+      // A card is still rendered only after its complete directory/subtitle
+      // metadata arrives, but that enrichment no longer blocks the next
+      // serialized 115 video search.
       match();
+      await completion?.catch((err) => Util.print(err?.message));
     };
 
-    const dispatch = (node, force = false, cacheOnly = false, auto = false, recheck = false, onSettled = null) => {
+    const dispatch = (node, force = false, cacheOnly = false, auto = false, recheck = false, onSettled = null, priority = false) => {
       if (auto && !isAutoMatchEnabled()) return;
       if (force) {
         delete node.dataset.matchPending;
@@ -824,14 +829,19 @@ const getPageDetails = (dom = document) => {
       if (!wait[searchKey]) wait[searchKey] = [];
       wait[searchKey].push({ ...details, auto, onSettled });
 
-      if (queue.includes(searchKey)) return;
-      queue.push(searchKey);
+      const queuedAt = queue.indexOf(searchKey);
+      if (queuedAt >= 0) {
+        if (priority && queuedAt > 0) queue.unshift(queue.splice(queuedAt, 1)[0]);
+        return;
+      }
+      if (priority) queue.unshift(searchKey);
+      else queue.push(searchKey);
       match();
     };
 
     const callback = (entries, obs) => {
       entries.forEach(({ isIntersecting, target }) => {
-        if (isIntersecting) obs.unobserve(target) || requestAnimationFrame(() => dispatch(target, false, false, true));
+        if (isIntersecting) obs.unobserve(target) || requestAnimationFrame(() => dispatch(target, false, false, true, false, null, true));
       });
     };
 
@@ -856,17 +866,17 @@ const getPageDetails = (dom = document) => {
         else delete wait[key];
       });
     };
-    const enqueue = (nodeList, { force = false, cacheOnly = false, auto = false, immediate = false, recheck = false, onSettled = null } = {}) => nodeList.forEach((node) => {
+    const enqueue = (nodeList, { force = false, cacheOnly = false, auto = false, immediate = false, recheck = false, onSettled = null, priority = false } = {}) => nodeList.forEach((node) => {
       // A forced refresh commonly comes from Quick View closing.  The card is
       // already in the viewport and has been unobserved, so it must bypass
       // IntersectionObserver and enter the queue directly.
       // Enabling auto-match is also immediate: cards already visible before
       // the observer was attached must enter the queue without a page reload.
-      if (force || immediate) return requestAnimationFrame(() => dispatch(node, force, cacheOnly, auto, recheck, onSettled));
+      if (force || immediate) return requestAnimationFrame(() => dispatch(node, force, cacheOnly, auto, recheck, onSettled, priority));
       // Matched-only actor mode hides unmatched cards, so they never intersect.
       // Queue them immediately to resolve their match state before CSS decides visibility.
       if (document.documentElement.classList.contains("x-actor-matched-only")) {
-        requestAnimationFrame(() => dispatch(node, force, cacheOnly, auto, recheck, onSettled));
+        requestAnimationFrame(() => dispatch(node, force, cacheOnly, auto, recheck, onSettled, priority));
       } else {
         obs.observe(node);
       }
@@ -876,6 +886,14 @@ const getPageDetails = (dom = document) => {
 
   const { enqueue: matchQueue, cancelAuto: cancelAutoMatchQueue } = useMatchQueue(matchBefore, matchAfter);
   const handledSyncs = new Set();
+  const prioritizeVisibleCards = (nodes) => [...nodes].sort((left, right) => {
+    const distance = (node) => {
+      const rect = node.getBoundingClientRect();
+      if (rect.bottom >= 0 && rect.top <= window.innerHeight) return 0;
+      return Math.min(Math.abs(rect.top), Math.abs(rect.bottom - window.innerHeight));
+    };
+    return distance(left) - distance(right);
+  });
   // Keep existing card-level refresh controls available while automatic 115
   // lookups are off.  Cached state still renders locally without a request.
   const hydrateMatchCard = (node) => {
@@ -885,10 +903,10 @@ const getPageDetails = (dom = document) => {
     if (cache !== null) matchAfter(details, cache);
   };
   movieList.forEach(hydrateMatchCard);
-  if (isAutoMatchEnabled()) matchQueue(movieList, { auto: true });
+  if (isAutoMatchEnabled()) matchQueue(prioritizeVisibleCards(movieList), { auto: true });
 
   window.addEventListener("JavDB.scroll", ({ detail }) => {
-    if (isAutoMatchEnabled()) matchQueue(detail, { auto: true });
+    if (isAutoMatchEnabled()) matchQueue(prioritizeVisibleCards(detail), { auto: true, priority: true });
   });
   // Rankings and other in-page modules can create cards before this userscript
   // has attached its custom-event listener.  Observe additions as a durable
@@ -902,12 +920,12 @@ const getPageDetails = (dom = document) => {
     });
     if (!cards.length) return;
     cards.forEach(hydrateMatchCard);
-    if (isAutoMatchEnabled()) matchQueue(cards, { auto: true });
+    if (isAutoMatchEnabled()) matchQueue(prioritizeVisibleCards(cards), { auto: true, priority: true });
   };
   new MutationObserver((records) => records.forEach((record) => matchDynamicCards(record.addedNodes)))
     .observe(document.body, { childList: true, subtree: true });
   window.addEventListener(AUTO_MATCH_EVENT, ({ detail }) => {
-    if (detail?.enabled) matchQueue(document.querySelectorAll(MOVIE_SELECTOR), { auto: true, immediate: true });
+    if (detail?.enabled) matchQueue(prioritizeVisibleCards(document.querySelectorAll(MOVIE_SELECTOR)), { auto: true, immediate: true });
     else cancelAutoMatchQueue();
   });
   window.addEventListener(RECHECK_UNMATCHED_EVENT, () => {

@@ -169,8 +169,12 @@ class Drive115 extends Req {
 class Req115 extends Drive115 {
   static MUTATION_GAP = 2000;
   static MUTATION_COORDINATOR_KEY = "__JavPack115MutationCoordinatorV1";
-  static REQUEST_GAP = 2000;
+  static REQUEST_GAP = 1000;
   static REQUEST_COORDINATOR_KEY = "__JavPack115RequestCoordinatorV1";
+  static GLOBAL_MATCH_SLOT_KEY = "JavPack115.matchSearchSlot.v1";
+  static GLOBAL_MATCH_SIGNAL_KEY = "__JavPack115MatchSearchSignalV1";
+  static GLOBAL_MATCH_OWNER_KEY = "__JavPack115MatchSearchOwnerV1";
+  static GLOBAL_MATCH_LEASE_MS = 15000;
 
   static getMutationRoot() {
     try {
@@ -178,6 +182,92 @@ class Req115 extends Drive115 {
       if (typeof window !== "undefined" && window.top) return window.top;
     } catch (_) {}
     return globalThis;
+  }
+
+  static canCoordinateMatchSearchAcrossTabs() {
+    return typeof GM_getValue === "function" && typeof GM_setValue === "function";
+  }
+
+  static getGlobalMatchOwner() {
+    const root = this.getMutationRoot();
+    if (!root[this.GLOBAL_MATCH_OWNER_KEY]) root[this.GLOBAL_MATCH_OWNER_KEY] = crypto.randomUUID();
+    return root[this.GLOBAL_MATCH_OWNER_KEY];
+  }
+
+  static getGlobalMatchSignal() {
+    const root = this.getMutationRoot();
+    if (root[this.GLOBAL_MATCH_SIGNAL_KEY]) return root[this.GLOBAL_MATCH_SIGNAL_KEY];
+
+    const signal = { waiters: new Set(), channel: null };
+    try {
+      signal.channel = new BroadcastChannel("JavPack115.matchSearchSlot.v1");
+      signal.channel.onmessage = () => {
+        [...signal.waiters].forEach((wake) => wake());
+      };
+    } catch (_) {}
+    root[this.GLOBAL_MATCH_SIGNAL_KEY] = signal;
+    return signal;
+  }
+
+  static notifyGlobalMatchSignal() {
+    try { this.getGlobalMatchSignal().channel?.postMessage({ type: "slot" }); } catch (_) {}
+  }
+
+  static waitForGlobalMatchSignal(ms) {
+    const signal = this.getGlobalMatchSignal();
+    return new Promise((resolve) => {
+      let timer;
+      const wake = () => {
+        clearTimeout(timer);
+        signal.waiters.delete(wake);
+        resolve();
+      };
+      signal.waiters.add(wake);
+      timer = setTimeout(wake, Math.max(50, Math.min(ms, 1000)));
+    });
+  }
+
+  static getGlobalMatchSlot() {
+    try { return GM_getValue(this.GLOBAL_MATCH_SLOT_KEY, null); } catch (_) { return null; }
+  }
+
+  static setGlobalMatchSlot(value) {
+    try {
+      GM_setValue(this.GLOBAL_MATCH_SLOT_KEY, value);
+      this.notifyGlobalMatchSignal();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static async acquireGlobalMatchSlot() {
+    if (!this.canCoordinateMatchSearchAcrossTabs()) return () => {};
+
+    const owner = this.getGlobalMatchOwner();
+    for (;;) {
+      const now = Date.now();
+      const slot = this.getGlobalMatchSlot() || {};
+      const ownerBusy = slot.owner && slot.owner !== owner && Number(slot.leaseUntil) > now;
+      const nextAt = Math.max(Number(slot.lastFinishedAt || 0) + this.REQUEST_GAP, ownerBusy ? Number(slot.leaseUntil) : 0);
+      if (nextAt > now) {
+        await this.waitForGlobalMatchSignal(nextAt - now);
+        continue;
+      }
+
+      const claim = { owner, leaseUntil: now + this.GLOBAL_MATCH_LEASE_MS, lastFinishedAt: Number(slot.lastFinishedAt || 0) };
+      if (!this.setGlobalMatchSlot(claim)) return () => {};
+      // GM storage does not offer compare-and-set.  Give a simultaneous tab a
+      // short claim window, then verify that this tab still owns the lease.
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      if (this.getGlobalMatchSlot()?.owner !== owner) continue;
+
+      return () => {
+        const current = this.getGlobalMatchSlot();
+        if (current?.owner !== owner) return;
+        this.setGlobalMatchSlot({ ...current, owner: "", leaseUntil: 0, lastFinishedAt: Date.now() });
+      };
+    }
   }
 
   static is115Request(config) {
@@ -219,8 +309,17 @@ class Req115 extends Drive115 {
           if (!entry.cancelled) coordinator.queue.unshift(entry);
           return;
         }
-        entry.started = true;
-        entry.resolve(await entry.task());
+        const releaseGlobalSlot = await this.acquireGlobalMatchSlot();
+        try {
+          if (coordinator.paused) {
+            if (!entry.cancelled) coordinator.queue.unshift(entry);
+            return;
+          }
+          entry.started = true;
+          entry.resolve(await entry.task());
+        } finally {
+          releaseGlobalSlot();
+        }
       } catch (err) {
         entry.reject(err);
       } finally {
@@ -277,9 +376,9 @@ class Req115 extends Drive115 {
       if (this.isRiskResponse(response)) this.pauseRequests(response.error_msg || response.message || "115 需要安全验证");
       return response;
     };
-    // Page matching is the only automatic high-fan-out path.  Keep that search
-    // serialized at two seconds; archive/offline internals already run in the
-    // mutation queue and should not inherit a delay for every API step.
+    // Page matching is the only automatic high-fan-out path.  Keep those
+    // searches serialized at one second globally across JavDB tabs; archive/
+    // offline internals stay outside this read-search coordinator.
     return this.isMatchSearchRequest(config) ? this.queue115Request(execute) : execute();
   }
 
