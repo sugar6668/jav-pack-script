@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.16
+// @version         0.0.17
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -36,8 +36,10 @@ const TARGET_CLASS = "x-match";
 const VOID = "javascript:void(0);";
 const CHANNEL = new BroadcastChannel(GM_info.script.name);
 const MATCH_API = "reMatch";
+const UNMATCHED_TXT = "未匹配";
 const AUTO_MATCH_STORAGE_KEY = "JavDB.match115.autoEnabled";
 const AUTO_MATCH_EVENT = "JavDB.match115.autoMatchChanged";
+const RECHECK_UNMATCHED_EVENT = "JavDB.match115.recheckUnmatched";
 
 const isAutoMatchEnabled = () => GM_getValue(AUTO_MATCH_STORAGE_KEY, false) === true;
 
@@ -72,6 +74,22 @@ const initAutoMatchToggle = () => {
   triggerWrap.append(trigger);
   wrap.insertAdjacentElement("afterend", triggerWrap);
 
+  if (document.querySelector(".movie-list")) {
+    const recheckWrap = wrap.tagName === "LI" ? document.createElement("li") : document.createElement("div");
+    const recheck = document.createElement("a");
+    recheckWrap.className = "x-recheck-unmatched-nav";
+    recheck.href = VOID;
+    recheck.className = `${settings.classList.contains("navbar-item") ? "navbar-item " : ""}x-recheck-unmatched-trigger`;
+    recheck.textContent = "\u91cd\u68c0\u672a\u5339\u914d";
+    recheck.title = "\u91cd\u65b0\u68c0\u6d4b\u5f53\u524d\u9875\u5df2\u8bb0\u5f55\u4e3a\u672a\u5339\u914d\u7684\u5f71\u7247";
+    recheck.addEventListener("click", (event) => {
+      event.preventDefault();
+      window.dispatchEvent(new CustomEvent(RECHECK_UNMATCHED_EVENT));
+    });
+    recheckWrap.append(recheck);
+    triggerWrap.insertAdjacentElement("afterend", recheckWrap);
+  }
+
   const render = (enabled) => {
     trigger.classList.toggle("is-active", enabled);
     trigger.setAttribute("aria-pressed", String(enabled));
@@ -99,6 +117,8 @@ const MatchCache = (() => {
   const PREFIX = "jdb_match_state_v2_";
   const LEGACY_PREFIX = "jdb_match_v1_";
   const MIGRATION_KEY = "jdb_match_state_v2_migrated";
+  const RECHECK_MIGRATION_KEY = "jdb_match_state_v2_recheck_migrated";
+  const STATE_VERSION = 2;
   const mem = new Map();
 
   const normalize = (key) => String(key || "").trim().toUpperCase();
@@ -113,6 +133,8 @@ const MatchCache = (() => {
     data,
     revision: (previous?.revision || 0) + 1,
     updatedAt,
+    stateVersion: STATE_VERSION,
+    needsRecheck: false,
   });
 
   const migrate = () => {
@@ -127,10 +149,30 @@ const MatchCache = (() => {
       const cacheKey = normalize(key.slice(LEGACY_PREFIX.length));
       if (!cacheKey || valid(GM_getValue(fullKey(cacheKey)))) return;
 
-      GM_setValue(fullKey(cacheKey), makeRecord(legacy.data, null, legacy.ts || Date.now()));
+      const migrated = makeRecord(legacy.data, null, legacy.ts || Date.now());
+      if (!legacy.data.length) migrated.needsRecheck = true;
+      GM_setValue(fullKey(cacheKey), migrated);
     });
 
     GM_setValue(MIGRATION_KEY, true);
+  };
+
+  // Earlier durable records did not distinguish a confirmed empty result from
+  // a negative result inherited from the old cache.  Recheck those old empty
+  // records once when the user turns automatic matching on.
+  const markLegacyUnmatchedForRecheck = () => {
+    if (GM_getValue(RECHECK_MIGRATION_KEY)) return;
+
+    GM_listValues().forEach((key) => {
+      if (!key.startsWith(PREFIX)) return;
+      const record = GM_getValue(key);
+      if (!valid(record) || record.status !== "unmatched" || record.stateVersion === STATE_VERSION) return;
+      const upgraded = { ...record, stateVersion: STATE_VERSION, needsRecheck: true };
+      mem.set(normalize(key.slice(PREFIX.length)), upgraded);
+      GM_setValue(key, upgraded);
+    });
+
+    GM_setValue(RECHECK_MIGRATION_KEY, true);
   };
 
   const del = (key) => {
@@ -140,7 +182,7 @@ const MatchCache = (() => {
     GM_deleteValue(fullKey(cacheKey));
   };
 
-  const get = (key) => {
+  const getRecord = (key) => {
     const cacheKey = normalize(key);
     if (!cacheKey) return null;
 
@@ -151,8 +193,10 @@ const MatchCache = (() => {
     }
 
     if (!valid(value)) return null;
-    return value.data;
+    return value;
   };
+
+  const get = (key) => getRecord(key)?.data ?? null;
 
   const set = (key, data) => {
     const cacheKey = normalize(key);
@@ -163,7 +207,8 @@ const MatchCache = (() => {
   };
 
   migrate();
-  return { get, set, del };
+  markLegacyUnmatchedForRecheck();
+  return { get, getRecord, set, del };
 })();
 
 
@@ -490,10 +535,19 @@ const getPageDetails = (dom = document) => {
       return;
     }
 
+    if (!force && !isAutoMatchEnabled()) {
+      block.cont.textContent = UNMATCHED_TXT;
+      block.load.textContent = UNMATCHED_TXT;
+      return;
+    }
+
     return matchCode(codeDetails, block);
   };
 
   matcher();
+  window.addEventListener(AUTO_MATCH_EVENT, ({ detail }) => {
+    if (detail?.enabled && block.cont.textContent === UNMATCHED_TXT) matcher();
+  });
   listenClick(() => matcher(true));
   unsafeWindow[MATCH_API] = matcher;
 
@@ -557,7 +611,7 @@ const getPageDetails = (dom = document) => {
   const CODE_SELECTORS = [".video-title", "strong"];
   const CODE_SELECTOR = CODE_SELECTORS.join(" ");
   const FORCE_MATCH_CLASS = "x-match-force";
-  const TARGET_HTML = `<a href="${VOID}" class="tag is-normal ${TARGET_CLASS}">${TARGET_TXT}</a><button type="button" class="tag is-light ${FORCE_MATCH_CLASS} is-hidden" title="强制重新匹配 115" aria-label="强制重新匹配 115">↻</button>`;
+  const TARGET_HTML = `<a href="${VOID}" class="tag is-normal ${TARGET_CLASS}">${UNMATCHED_TXT}</a><button type="button" class="tag is-light ${FORCE_MATCH_CLASS} is-hidden" title="强制重新匹配 115" aria-label="强制重新匹配 115">↻</button>`;
   const SUBTITLE_ICON_HTML = `<span class="tag x-match-subtitle" title="网盘目录内已有字幕" aria-label="网盘目录内已有字幕"><svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M2 12C2 8.22876 2 6.34315 3.17157 5.17157C4.34315 4 6.22876 4 10 4H14C17.7712 4 19.6569 4 20.8284 5.17157C22 6.34315 22 8.22876 22 12C22 15.7712 22 17.6569 20.8284 18.8284C19.6569 20 17.7712 20 14 20H10C6.22876 20 4.34315 20 3.17157 18.8284C2 17.6569 2 15.7712 2 12ZM6 15.25C5.58579 15.25 5.25 15.5858 5.25 16C5.25 16.4142 5.58579 16.75 6 16.75H10C10.4142 16.75 10.75 16.4142 10.75 16C10.75 15.5858 10.4142 15.25 10 15.25H6ZM7.75 13C7.75 12.5858 7.41421 12.25 7 12.25H6C5.58579 12.25 5.25 12.5858 5.25 13C5.25 13.4142 5.58579 13.75 6 13.75H7C7.41421 13.75 7.75 13.4142 7.75 13ZM11.5 12.25C11.9142 12.25 12.25 12.5858 12.25 13C12.25 13.4142 11.9142 13.75 11.5 13.75H9.5C9.08579 13.75 8.75 13.4142 8.75 13C8.75 12.5858 9.08579 12.25 9.5 12.25H11.5ZM18.75 13C18.75 12.5858 18.4142 12.25 18 12.25H14C13.5858 12.25 13.25 12.5858 13.25 13C13.25 13.4142 13.5858 13.75 14 13.75H18C18.4142 13.75 18.75 13.4142 18.75 13ZM12.5 15.25C12.0858 15.25 11.75 15.5858 11.75 16C11.75 16.4142 12.0858 16.75 12.5 16.75H14C14.4142 16.75 14.75 16.4142 14.75 16C14.75 15.5858 14.4142 15.25 14 15.25H12.5ZM15.75 16C15.75 15.5858 16.0858 15.25 16.5 15.25H18C18.4142 15.25 18.75 15.5858 18.75 16C18.75 16.4142 18.4142 16.75 18 16.75H16.5C16.0858 16.75 15.75 16.4142 15.75 16Z" fill="currentColor"></path></svg></span>`;
   const MATCH_TYPE_COLORS = {
     normal: "var(--x-success)",
@@ -619,7 +673,7 @@ const getPageDetails = (dom = document) => {
     let cid = "";
     let title = "鼠标左键缓存刷新，右键接口刷新";
     let className = "is-normal";
-    let textContent = "未匹配";
+    let textContent = UNMATCHED_TXT;
 
     if (len) {
       const zhs = sources.filter((it) => Magnet.zhReg.test(it.n));
@@ -717,21 +771,28 @@ const getPageDetails = (dom = document) => {
       match();
     };
 
-    const dispatch = (node, force = false, cacheOnly = false, auto = false) => {
+    const dispatch = (node, force = false, cacheOnly = false, auto = false, recheck = false) => {
       if (auto && !isAutoMatchEnabled()) return;
       if (force) {
         delete node.dataset.matchPending;
         delete node.dataset.matchResolved;
       }
-      if (node.dataset.matchPending === "1" || node.dataset.matchResolved === "1") return;
       const details = before?.(node);
       if (!details) return;
 
+      const { code, prefix, searchKey } = details;
+      const record = MatchCache.getRecord(code) ?? MatchCache.getRecord(prefix);
+      const recheckLegacyEmpty = auto && record?.needsRecheck === true;
+      if (force || recheck || recheckLegacyEmpty) {
+        delete node.dataset.matchPending;
+        delete node.dataset.matchResolved;
+      }
+      if (node.dataset.matchPending === "1" || node.dataset.matchResolved === "1") return;
+
       node.dataset.matchPending = "1";
 
-      const { code, prefix, searchKey } = details;
-      const cache = MatchCache.get(code) ?? MatchCache.get(prefix);
-      if (cache !== null) {
+      const cache = record?.data ?? null;
+      if (cache !== null && !recheck && !recheckLegacyEmpty) {
         // Cached rows already include the fields needed to render the card.
         // Do not turn a page refresh into one directory request per matched item.
         return after?.(details, cache);
@@ -764,15 +825,17 @@ const getPageDetails = (dom = document) => {
         else delete wait[key];
       });
     };
-    const enqueue = (nodeList, { force = false, cacheOnly = false, auto = false } = {}) => nodeList.forEach((node) => {
+    const enqueue = (nodeList, { force = false, cacheOnly = false, auto = false, immediate = false, recheck = false } = {}) => nodeList.forEach((node) => {
       // A forced refresh commonly comes from Quick View closing.  The card is
       // already in the viewport and has been unobserved, so it must bypass
       // IntersectionObserver and enter the queue directly.
-      if (force) return requestAnimationFrame(() => dispatch(node, true, cacheOnly, auto));
+      // Enabling auto-match is also immediate: cards already visible before
+      // the observer was attached must enter the queue without a page reload.
+      if (force || immediate) return requestAnimationFrame(() => dispatch(node, force, cacheOnly, auto, recheck));
       // Matched-only actor mode hides unmatched cards, so they never intersect.
       // Queue them immediately to resolve their match state before CSS decides visibility.
       if (document.documentElement.classList.contains("x-actor-matched-only")) {
-        requestAnimationFrame(() => dispatch(node, force, cacheOnly, auto));
+        requestAnimationFrame(() => dispatch(node, force, cacheOnly, auto, recheck));
       } else {
         obs.observe(node);
       }
@@ -813,8 +876,21 @@ const getPageDetails = (dom = document) => {
   new MutationObserver((records) => records.forEach((record) => matchDynamicCards(record.addedNodes)))
     .observe(document.body, { childList: true, subtree: true });
   window.addEventListener(AUTO_MATCH_EVENT, ({ detail }) => {
-    if (detail?.enabled) matchQueue(document.querySelectorAll(MOVIE_SELECTOR), { auto: true });
+    if (detail?.enabled) matchQueue(document.querySelectorAll(MOVIE_SELECTOR), { auto: true, immediate: true });
     else cancelAutoMatchQueue();
+  });
+  window.addEventListener(RECHECK_UNMATCHED_EVENT, () => {
+    const cards = [...document.querySelectorAll(MOVIE_SELECTOR)].filter((node) => {
+      const details = matchBefore(node);
+      if (!details) return false;
+      return (MatchCache.getRecord(details.code) ?? MatchCache.getRecord(details.prefix))?.status === "unmatched";
+    });
+    if (!cards.length) {
+      Util.print("\u5f53\u524d\u9875\u6ca1\u6709\u5df2\u8bb0\u5f55\u7684\u672a\u5339\u914d\u5f71\u7247");
+      return;
+    }
+    if (!window.confirm(`\u91cd\u65b0\u68c0\u6d4b\u5f53\u524d\u9875 ${cards.length} \u90e8\u5df2\u8bb0\u5f55\u4e3a\u672a\u5339\u914d\u7684\u5f71\u7247\uff1f`)) return;
+    matchQueue(cards, { immediate: true, recheck: true });
   });
   const receiveMatchState = (data) => {
     const payload = typeof data === "string" ? { code: data } : data;

@@ -204,24 +204,24 @@ body:has(.x-load) #footer,
  * original navigation instead of Bulma's near-white navbar-item background. */
 .navbar.is-black .navbar-start :is(
   .x-layout-trigger,
-  .x-auto-match-trigger
+  .x-auto-match-trigger,
+  .x-recheck-unmatched-trigger
 ):is(:hover, :focus, :focus-within),
 .navbar.is-black .navbar-start .x-rankings-override-nav:is(:hover, :focus, :focus-within) {
   background-color: rgb(var(--x-rgb) / 9%) !important;
 }
 
-/* Rankings has a navbar-item wrapper plus its own link.  The wrapper owns
- * the hover fill; keep the inner link transparent to prevent a second block. */
+/* Rankings owns its hover fill on the wrapper; keep the inner link transparent. */
 .navbar.is-black .navbar-start .x-rankings-override-nav > .x-rankings-override-trigger:is(:hover, :focus, :focus-within) {
   background-color: transparent !important;
 }
 
-.navbar.is-black .navbar-start :is(.x-rankings-override-nav, .x-auto-match-nav) {
+.navbar.is-black .navbar-start :is(.x-rankings-override-nav, .x-auto-match-nav, .x-recheck-unmatched-nav) {
   display: flex;
   align-items: stretch;
 }
 
-.navbar.is-black .navbar-start :is(.x-rankings-override-trigger, .x-auto-match-trigger) {
+.navbar.is-black .navbar-start :is(.x-rankings-override-trigger, .x-auto-match-trigger, .x-recheck-unmatched-trigger) {
   height: 100%;
 }
 
