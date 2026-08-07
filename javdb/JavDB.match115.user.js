@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.15
+// @version         0.0.16
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -36,6 +36,63 @@ const TARGET_CLASS = "x-match";
 const VOID = "javascript:void(0);";
 const CHANNEL = new BroadcastChannel(GM_info.script.name);
 const MATCH_API = "reMatch";
+const AUTO_MATCH_STORAGE_KEY = "JavDB.match115.autoEnabled";
+const AUTO_MATCH_EVENT = "JavDB.match115.autoMatchChanged";
+
+const isAutoMatchEnabled = () => GM_getValue(AUTO_MATCH_STORAGE_KEY, false) === true;
+
+const setAutoMatchEnabled = (enabled) => {
+  const value = Boolean(enabled);
+  GM_setValue(AUTO_MATCH_STORAGE_KEY, value);
+  window.dispatchEvent(new CustomEvent(AUTO_MATCH_EVENT, { detail: { enabled: value } }));
+  return value;
+};
+
+const initAutoMatchToggle = () => {
+  if (document.querySelector(".x-auto-match-trigger")) return true;
+
+  // The layout script owns the Settings entry.  Insert after it so the two
+  // controls remain adjacent on both the tab and navbar variants.
+  const settings = document.querySelector(".x-layout-trigger");
+  if (!settings) return false;
+
+  const wrap = settings.closest("li") || settings.parentElement;
+  if (!wrap?.parentElement) return false;
+
+  const triggerWrap = wrap.tagName === "LI" ? document.createElement("li") : document.createElement("div");
+  const trigger = document.createElement("a");
+  const dot = document.createElement("span");
+  trigger.href = VOID;
+  trigger.className = `${settings.classList.contains("navbar-item") ? "navbar-item " : ""}x-auto-match-trigger`;
+  trigger.textContent = "\u81ea\u52a8\u5339\u914d";
+  dot.className = "x-auto-match-indicator";
+  dot.setAttribute("aria-hidden", "true");
+  trigger.append(dot);
+  triggerWrap.append(trigger);
+  wrap.insertAdjacentElement("afterend", triggerWrap);
+
+  const render = (enabled) => {
+    trigger.classList.toggle("is-active", enabled);
+    trigger.setAttribute("aria-pressed", String(enabled));
+    trigger.title = enabled ? "\u70b9\u51fb\u53d6\u6d88\u81ea\u52a8\u5339\u914d" : "\u70b9\u51fb\u5f00\u59cb\u81ea\u52a8\u5339\u914d";
+  };
+  render(isAutoMatchEnabled());
+  trigger.addEventListener("click", (event) => {
+    event.preventDefault();
+    render(setAutoMatchEnabled(!isAutoMatchEnabled()));
+  });
+  window.addEventListener(AUTO_MATCH_EVENT, ({ detail }) => render(Boolean(detail?.enabled)));
+  return true;
+};
+
+const observeAutoMatchToggle = () => {
+  if (initAutoMatchToggle()) return;
+  const observer = new MutationObserver(() => {
+    if (initAutoMatchToggle()) observer.disconnect();
+  });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  setTimeout(() => observer.disconnect(), 10 * 1000);
+};
 
 const MatchCache = (() => {
   const PREFIX = "jdb_match_state_v2_";
@@ -182,6 +239,31 @@ const extractData = (data, format = "s") => {
     const source = JSON.parse(JSON.stringify(item, keys));
     return { ...source, bytes: Number(item[format]) || 0, [format]: formatBytes(item[format]) };
   });
+};
+
+const materializeOfflineMatch = (payload = {}) => {
+  const details = Util.codeParse(payload.code);
+  return extractData(payload.data || []).map((file) => {
+    const subtitleFiles = (payload.subtitleFiles || [])
+      .filter((subtitle) => window.JavPackMatch115Console?.belongsToVideoSubtitleFile?.(file, subtitle, details))
+      .map((subtitle) => ({ n: subtitle.n || subtitle.name || subtitle.file_name || "", s: subtitle.s || 0 }));
+    return {
+      ...file,
+      cid: payload.cid || file.cid,
+      realPath: payload.realPath || file.realPath,
+      hasCover: Boolean(payload.hasCover),
+      hasSubtitle: Boolean(subtitleFiles.length),
+      subtitleFiles,
+      subtitleDetectionVersion: window.JavPackMatch115Console?.subtitleDetectionVersion,
+    };
+  });
+};
+
+unsafeWindow.JavDBMatchSyncOffline = (payload) => {
+  if (!payload?.code || !Array.isArray(payload.data)) return null;
+  const sources = materializeOfflineMatch(payload);
+  MatchCache.set(payload.code, sources);
+  return sources;
 };
 
 const formatDirectory = (item) => {
@@ -601,18 +683,22 @@ const getPageDetails = (dom = document) => {
     let loading = false;
 
     const over = async (key, data = [], shouldCache = false) => {
-      await Promise.all(wait[key].map(async (it) => {
+      const pending = wait[key] || [];
+      delete wait[key];
+      await Promise.all(pending.map(async (it) => {
         const scoped = data.filter((file) => it.regex.test(file.n));
         const enriched = await enrichMetadata(scoped, it);
         if (shouldCache) MatchCache.set(it.code, enriched);
         after?.(it, enriched);
       }));
-      delete wait[key];
     };
 
     const match = async () => {
       if (loading || !queue.length) return;
-      const searchKey = queue[0];
+      const searchKey = queue.shift();
+      // Auto-match can be disabled while entries are waiting in the queue.
+      // Skip an empty batch instead of issuing another 115 search.
+      if (!wait[searchKey]?.length) return match();
       loading = true;
 
       try {
@@ -627,11 +713,11 @@ const getPageDetails = (dom = document) => {
       }
 
       loading = false;
-      queue.shift();
       match();
     };
 
-    const dispatch = (node, force = false, cacheOnly = false) => {
+    const dispatch = (node, force = false, cacheOnly = false, auto = false) => {
+      if (auto && !isAutoMatchEnabled()) return;
       if (force) {
         delete node.dataset.matchPending;
         delete node.dataset.matchResolved;
@@ -651,7 +737,7 @@ const getPageDetails = (dom = document) => {
       }
 
       if (!wait[searchKey]) wait[searchKey] = [];
-      wait[searchKey].push(details);
+      wait[searchKey].push({ ...details, auto });
 
       if (queue.includes(searchKey)) return;
       queue.push(searchKey);
@@ -660,31 +746,55 @@ const getPageDetails = (dom = document) => {
 
     const callback = (entries, obs) => {
       entries.forEach(({ isIntersecting, target }) => {
-        if (isIntersecting) obs.unobserve(target) || requestAnimationFrame(() => dispatch(target));
+        if (isIntersecting) obs.unobserve(target) || requestAnimationFrame(() => dispatch(target, false, false, true));
       });
     };
 
     const obs = new IntersectionObserver(callback, { threshold: 0.25 });
-    return (nodeList, { force = false, cacheOnly = false } = {}) => nodeList.forEach((node) => {
+    const cancelAuto = () => {
+      Object.entries(wait).forEach(([key, pending]) => {
+        const keep = pending.filter((it) => {
+          if (!it.auto) return true;
+          const card = it.target.closest(MOVIE_SELECTOR);
+          delete card?.dataset.matchPending;
+          return false;
+        });
+        if (keep.length) wait[key] = keep;
+        else delete wait[key];
+      });
+    };
+    const enqueue = (nodeList, { force = false, cacheOnly = false, auto = false } = {}) => nodeList.forEach((node) => {
       // A forced refresh commonly comes from Quick View closing.  The card is
       // already in the viewport and has been unobserved, so it must bypass
       // IntersectionObserver and enter the queue directly.
-      if (force) return requestAnimationFrame(() => dispatch(node, true, cacheOnly));
+      if (force) return requestAnimationFrame(() => dispatch(node, true, cacheOnly, auto));
       // Matched-only actor mode hides unmatched cards, so they never intersect.
       // Queue them immediately to resolve their match state before CSS decides visibility.
       if (document.documentElement.classList.contains("x-actor-matched-only")) {
-        requestAnimationFrame(() => dispatch(node, force, cacheOnly));
+        requestAnimationFrame(() => dispatch(node, force, cacheOnly, auto));
       } else {
         obs.observe(node);
       }
     });
+    return { enqueue, cancelAuto };
   };
 
-  const matchQueue = useMatchQueue(matchBefore, matchAfter);
+  const { enqueue: matchQueue, cancelAuto: cancelAutoMatchQueue } = useMatchQueue(matchBefore, matchAfter);
   const handledSyncs = new Set();
-  matchQueue(movieList);
+  // Keep existing card-level refresh controls available while automatic 115
+  // lookups are off.  Cached state still renders locally without a request.
+  const hydrateMatchCard = (node) => {
+    const details = matchBefore(node);
+    if (!details) return;
+    const cache = MatchCache.get(details.code) ?? MatchCache.get(details.prefix);
+    if (cache !== null) matchAfter(details, cache);
+  };
+  movieList.forEach(hydrateMatchCard);
+  if (isAutoMatchEnabled()) matchQueue(movieList, { auto: true });
 
-  window.addEventListener("JavDB.scroll", ({ detail }) => matchQueue(detail));
+  window.addEventListener("JavDB.scroll", ({ detail }) => {
+    if (isAutoMatchEnabled()) matchQueue(detail, { auto: true });
+  });
   // Rankings and other in-page modules can create cards before this userscript
   // has attached its custom-event listener.  Observe additions as a durable
   // fallback so every normal `.movie-list .item` gets the same match UI.
@@ -695,10 +805,16 @@ const getPageDetails = (dom = document) => {
       if (node.matches?.(MOVIE_SELECTOR)) cards.push(node);
       cards.push(...node.querySelectorAll?.(MOVIE_SELECTOR) || []);
     });
-    if (cards.length) matchQueue(cards);
+    if (!cards.length) return;
+    cards.forEach(hydrateMatchCard);
+    if (isAutoMatchEnabled()) matchQueue(cards, { auto: true });
   };
   new MutationObserver((records) => records.forEach((record) => matchDynamicCards(record.addedNodes)))
     .observe(document.body, { childList: true, subtree: true });
+  window.addEventListener(AUTO_MATCH_EVENT, ({ detail }) => {
+    if (detail?.enabled) matchQueue(document.querySelectorAll(MOVIE_SELECTOR), { auto: true });
+    else cancelAutoMatchQueue();
+  });
   const receiveMatchState = (data) => {
     const payload = typeof data === "string" ? { code: data } : data;
     if (!payload?.code) return;
@@ -708,23 +824,7 @@ const getPageDetails = (dom = document) => {
       setTimeout(() => handledSyncs.delete(payload.id), 30 * 1000);
     }
     if ((payload.type === "sync" || payload.type === "offline") && Array.isArray(payload.data)) {
-      const sources = payload.type === "offline"
-        ? extractData(payload.data).map((file) => {
-          const details = Util.codeParse(payload.code);
-          const subtitleFiles = (payload.subtitleFiles || [])
-            .filter((subtitle) => window.JavPackMatch115Console?.belongsToVideoSubtitleFile?.(file, subtitle, details))
-            .map((subtitle) => ({ n: subtitle.n || subtitle.name || subtitle.file_name || "", s: subtitle.s || 0 }));
-          return {
-            ...file,
-            cid: payload.cid || file.cid,
-            realPath: payload.realPath || file.realPath,
-            hasCover: Boolean(payload.hasCover),
-            hasSubtitle: Boolean(subtitleFiles.length),
-            subtitleFiles,
-            subtitleDetectionVersion: window.JavPackMatch115Console?.subtitleDetectionVersion,
-          };
-        })
-        : payload.data;
+      const sources = payload.type === "offline" ? materializeOfflineMatch(payload) : payload.data;
       MatchCache.set(payload.code, sources);
       // The parent receives an exact post-mutation snapshot before the Quick
       // View frame disappears, so it can repaint without querying 115 again.
@@ -815,3 +915,5 @@ const getPageDetails = (dom = document) => {
   document.addEventListener("click", forceMatch, true);
   listenClick(matchCode, refresh);
 })();
+
+observeAutoMatchToggle();

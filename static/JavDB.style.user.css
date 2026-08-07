@@ -200,6 +200,17 @@ body:has(.x-load) #footer,
   }
 }
 
+/* Keep custom top-level entries on the same subdued hover treatment as the
+ * original navigation instead of Bulma's near-white navbar-item background. */
+.navbar.is-black .navbar-start :is(
+  .x-rankings-override-nav,
+  .x-rankings-override-trigger,
+  .x-layout-trigger,
+  .x-auto-match-trigger
+):is(:hover, :focus, :focus-within) {
+  background-color: rgb(var(--x-rgb) / 9%) !important;
+}
+
 .search-bar-container {
   margin-bottom: 0.25rem !important;
 }
@@ -1946,6 +1957,28 @@ br + .title {
   .search-recent-keywords {
     display: none;
   }
+}
+
+.x-auto-match-trigger {
+  display: inline-flex !important;
+  align-items: center;
+  gap: .42rem;
+}
+
+.x-auto-match-indicator {
+  width: .52rem;
+  height: .52rem;
+  border-radius: 50%;
+  background: #27e36a;
+  box-shadow: 0 0 .3rem #27e36a, 0 0 .72rem rgb(39 227 106 / 82%);
+  opacity: 0;
+  transform: scale(.45);
+  transition: opacity .16s ease, transform .16s ease;
+}
+
+.x-auto-match-trigger.is-active .x-auto-match-indicator {
+  opacity: 1;
+  transform: scale(1);
 }
 
 
