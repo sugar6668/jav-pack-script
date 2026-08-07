@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.17
+// @version         0.0.20
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -40,6 +40,7 @@ const UNMATCHED_TXT = "未匹配";
 const AUTO_MATCH_STORAGE_KEY = "JavDB.match115.autoEnabled";
 const AUTO_MATCH_EVENT = "JavDB.match115.autoMatchChanged";
 const RECHECK_UNMATCHED_EVENT = "JavDB.match115.recheckUnmatched";
+const RECHECK_STATUS_EVENT = "JavDB.match115.recheckStatusChanged";
 
 const isAutoMatchEnabled = () => GM_getValue(AUTO_MATCH_STORAGE_KEY, false) === true;
 
@@ -47,6 +48,7 @@ const setAutoMatchEnabled = (enabled) => {
   const value = Boolean(enabled);
   GM_setValue(AUTO_MATCH_STORAGE_KEY, value);
   window.dispatchEvent(new CustomEvent(AUTO_MATCH_EVENT, { detail: { enabled: value } }));
+  if (!value) window.dispatchEvent(new CustomEvent(RECHECK_STATUS_EVENT, { detail: { status: "idle" } }));
   return value;
 };
 
@@ -77,6 +79,7 @@ const initAutoMatchToggle = () => {
   if (document.querySelector(".movie-list")) {
     const recheckWrap = wrap.tagName === "LI" ? document.createElement("li") : document.createElement("div");
     const recheck = document.createElement("a");
+    const recheckDot = document.createElement("span");
     recheckWrap.className = "x-recheck-unmatched-nav";
     recheck.href = VOID;
     recheck.className = `${settings.classList.contains("navbar-item") ? "navbar-item " : ""}x-recheck-unmatched-trigger`;
@@ -86,8 +89,16 @@ const initAutoMatchToggle = () => {
       event.preventDefault();
       window.dispatchEvent(new CustomEvent(RECHECK_UNMATCHED_EVENT));
     });
+    recheckDot.className = "x-recheck-unmatched-indicator";
+    recheckDot.setAttribute("aria-hidden", "true");
+    recheck.append(recheckDot);
     recheckWrap.append(recheck);
     triggerWrap.insertAdjacentElement("afterend", recheckWrap);
+    window.addEventListener(RECHECK_STATUS_EVENT, ({ detail }) => {
+      const status = detail?.status || "idle";
+      recheck.classList.toggle("is-running", status === "running");
+      recheck.classList.toggle("is-finished", status === "finished");
+    });
   }
 
   const render = (enabled) => {
@@ -741,10 +752,14 @@ const getPageDetails = (dom = document) => {
       const pending = wait[key] || [];
       delete wait[key];
       await Promise.all(pending.map(async (it) => {
-        const scoped = data.filter((file) => it.regex.test(file.n));
-        const enriched = await enrichMetadata(scoped, it);
-        if (shouldCache) MatchCache.set(it.code, enriched);
-        after?.(it, enriched);
+        try {
+          const scoped = data.filter((file) => it.regex.test(file.n));
+          const enriched = await enrichMetadata(scoped, it);
+          if (shouldCache) MatchCache.set(it.code, enriched);
+          after?.(it, enriched);
+        } finally {
+          it.onSettled?.();
+        }
       }));
     };
 
@@ -771,7 +786,7 @@ const getPageDetails = (dom = document) => {
       match();
     };
 
-    const dispatch = (node, force = false, cacheOnly = false, auto = false, recheck = false) => {
+    const dispatch = (node, force = false, cacheOnly = false, auto = false, recheck = false, onSettled = null) => {
       if (auto && !isAutoMatchEnabled()) return;
       if (force) {
         delete node.dataset.matchPending;
@@ -789,6 +804,14 @@ const getPageDetails = (dom = document) => {
       }
       if (node.dataset.matchPending === "1" || node.dataset.matchResolved === "1") return;
 
+      if (recheck) {
+        const tag = details.target.querySelector(`.${TARGET_CLASS}`);
+        if (tag) {
+          tag.textContent = TARGET_TXT;
+          tag.title = "";
+        }
+      }
+
       node.dataset.matchPending = "1";
 
       const cache = record?.data ?? null;
@@ -799,7 +822,7 @@ const getPageDetails = (dom = document) => {
       }
 
       if (!wait[searchKey]) wait[searchKey] = [];
-      wait[searchKey].push({ ...details, auto });
+      wait[searchKey].push({ ...details, auto, onSettled });
 
       if (queue.includes(searchKey)) return;
       queue.push(searchKey);
@@ -819,23 +842,31 @@ const getPageDetails = (dom = document) => {
           if (!it.auto) return true;
           const card = it.target.closest(MOVIE_SELECTOR);
           delete card?.dataset.matchPending;
+          if (it.recheck) {
+            const tag = it.target.querySelector(`.${TARGET_CLASS}`);
+            if (tag) {
+              tag.textContent = UNMATCHED_TXT;
+              tag.title = "";
+            }
+          }
+          it.onSettled?.();
           return false;
         });
         if (keep.length) wait[key] = keep;
         else delete wait[key];
       });
     };
-    const enqueue = (nodeList, { force = false, cacheOnly = false, auto = false, immediate = false, recheck = false } = {}) => nodeList.forEach((node) => {
+    const enqueue = (nodeList, { force = false, cacheOnly = false, auto = false, immediate = false, recheck = false, onSettled = null } = {}) => nodeList.forEach((node) => {
       // A forced refresh commonly comes from Quick View closing.  The card is
       // already in the viewport and has been unobserved, so it must bypass
       // IntersectionObserver and enter the queue directly.
       // Enabling auto-match is also immediate: cards already visible before
       // the observer was attached must enter the queue without a page reload.
-      if (force || immediate) return requestAnimationFrame(() => dispatch(node, force, cacheOnly, auto, recheck));
+      if (force || immediate) return requestAnimationFrame(() => dispatch(node, force, cacheOnly, auto, recheck, onSettled));
       // Matched-only actor mode hides unmatched cards, so they never intersect.
       // Queue them immediately to resolve their match state before CSS decides visibility.
       if (document.documentElement.classList.contains("x-actor-matched-only")) {
-        requestAnimationFrame(() => dispatch(node, force, cacheOnly, auto, recheck));
+        requestAnimationFrame(() => dispatch(node, force, cacheOnly, auto, recheck, onSettled));
       } else {
         obs.observe(node);
       }
@@ -880,17 +911,31 @@ const getPageDetails = (dom = document) => {
     else cancelAutoMatchQueue();
   });
   window.addEventListener(RECHECK_UNMATCHED_EVENT, () => {
-    const cards = [...document.querySelectorAll(MOVIE_SELECTOR)].filter((node) => {
-      const details = matchBefore(node);
-      if (!details) return false;
-      return (MatchCache.getRecord(details.code) ?? MatchCache.getRecord(details.prefix))?.status === "unmatched";
-    });
-    if (!cards.length) {
-      Util.print("\u5f53\u524d\u9875\u6ca1\u6709\u5df2\u8bb0\u5f55\u7684\u672a\u5339\u914d\u5f71\u7247");
+    if (!isAutoMatchEnabled()) {
+      Util.print("\u8bf7\u5148\u5f00\u542f\u81ea\u52a8\u5339\u914d");
       return;
     }
-    if (!window.confirm(`\u91cd\u65b0\u68c0\u6d4b\u5f53\u524d\u9875 ${cards.length} \u90e8\u5df2\u8bb0\u5f55\u4e3a\u672a\u5339\u914d\u7684\u5f71\u7247\uff1f`)) return;
-    matchQueue(cards, { immediate: true, recheck: true });
+    const cards = [...document.querySelectorAll(MOVIE_SELECTOR)].flatMap((node) => {
+      const details = matchBefore(node);
+      if (!details) return [];
+      const record = MatchCache.getRecord(details.code) ?? MatchCache.getRecord(details.prefix);
+      // The "未匹配" label can mean either a stored empty result or no local
+      // state at all.  Recheck both, while never disturbing a matched record.
+      if (record?.status === "matched") return [];
+      MatchCache.del(details.code);
+      return [node];
+    });
+    if (!cards.length) {
+      Util.print("\u5f53\u524d\u9875\u6ca1\u6709\u9700\u8981\u91cd\u68c0\u7684\u672a\u5339\u914d\u5f71\u7247");
+      return;
+    }
+    let remaining = cards.length;
+    window.dispatchEvent(new CustomEvent(RECHECK_STATUS_EVENT, { detail: { status: "running" } }));
+    const onSettled = () => {
+      remaining -= 1;
+      if (remaining === 0) window.dispatchEvent(new CustomEvent(RECHECK_STATUS_EVENT, { detail: { status: "finished" } }));
+    };
+    matchQueue(cards, { force: true, immediate: true, auto: true, recheck: true, onSettled });
   });
   const receiveMatchState = (data) => {
     const payload = typeof data === "string" ? { code: data } : data;

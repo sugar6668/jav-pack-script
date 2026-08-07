@@ -252,6 +252,36 @@ body:has(.x-load) #footer,
   transform: scale(1);
 }
 
+.x-recheck-unmatched-trigger {
+  display: inline-flex !important;
+  align-items: center;
+  gap: .42rem;
+  cursor: pointer;
+}
+
+.x-recheck-unmatched-indicator {
+  width: .52rem;
+  height: .52rem;
+  border-radius: 50%;
+  opacity: 0;
+  transform: scale(.45);
+  transition: opacity .16s ease, transform .16s ease, box-shadow .16s ease;
+}
+
+.x-recheck-unmatched-trigger.is-running .x-recheck-unmatched-indicator {
+  background: #ff4d5f;
+  box-shadow: 0 0 .3rem #ff4d5f, 0 0 .72rem rgb(255 77 95 / 82%);
+  opacity: 1;
+  transform: scale(1);
+}
+
+.x-recheck-unmatched-trigger.is-finished .x-recheck-unmatched-indicator {
+  background: #27e36a;
+  box-shadow: 0 0 .3rem #27e36a, 0 0 .72rem rgb(39 227 106 / 82%);
+  opacity: 1;
+  transform: scale(1);
+}
+
 .search-bar-container {
   margin-bottom: 0.25rem !important;
 }
