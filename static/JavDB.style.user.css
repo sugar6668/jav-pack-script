@@ -225,6 +225,69 @@ body:has(.x-load) #footer,
   height: 100%;
 }
 
+.x-auto-match-nav,
+.x-recheck-unmatched-nav {
+  position: relative;
+}
+
+.x-match-queue-count {
+  display: none;
+  align-items: center;
+  min-width: max-content;
+  padding: 0 .42rem .08rem;
+  color: rgb(255 255 255 / 72%);
+  font-size: .68rem;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.x-auto-match-nav.is-queue-active .x-auto-queue-count,
+.x-recheck-unmatched-nav.is-queue-active .x-recheck-queue-count {
+  display: inline-flex;
+}
+
+.x-match-queue-progress {
+  position: absolute;
+  right: .5rem;
+  bottom: 0;
+  left: .5rem;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: rgb(255 255 255 / 14%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .18s ease;
+}
+
+.x-auto-match-nav.is-queue-active .x-match-queue-progress,
+.x-recheck-unmatched-nav.is-queue-active .x-match-queue-progress,
+.x-auto-match-nav.is-queue-finished .x-match-queue-progress,
+.x-recheck-unmatched-nav.is-queue-finished .x-match-queue-progress {
+  opacity: 1;
+}
+
+.x-match-queue-progress-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: #7585df;
+  box-shadow: 0 0 .42rem rgb(117 133 223 / 86%);
+  transition: width .2s ease;
+}
+
+.x-recheck-unmatched-nav .x-match-queue-progress-fill {
+  background: #ff7180;
+  box-shadow: 0 0 .42rem rgb(255 113 128 / 86%);
+}
+
+.x-auto-match-nav.is-queue-finished .x-match-queue-progress-fill,
+.x-recheck-unmatched-nav.is-queue-finished .x-match-queue-progress-fill {
+  background: #27e36a;
+  box-shadow: 0 0 .42rem rgb(39 227 106 / 82%);
+}
+
 .x-auto-match-trigger {
   display: inline-flex !important;
   align-items: center;
@@ -280,6 +343,22 @@ body:has(.x-load) #footer,
   box-shadow: 0 0 .3rem #27e36a, 0 0 .72rem rgb(39 227 106 / 82%);
   opacity: 1;
   transform: scale(1);
+}
+
+.movie-list .item:has(.x-match.is-unknown):not(.x-multi-matched) {
+  border-color: #6875c8;
+}
+
+.movie-list .item:has(.x-match.is-metadata-pending):not(.x-multi-matched) {
+  border-color: var(--x-info-bd);
+}
+
+.movie-list .item .video-title .x-match.is-unknown {
+  background-color: #6875c8;
+}
+
+.movie-list .item .video-title .x-match.is-metadata-pending {
+  background-color: var(--x-info);
 }
 
 .search-bar-container {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.22
+// @version         0.0.27
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -41,6 +41,9 @@ const AUTO_MATCH_STORAGE_KEY = "JavDB.match115.autoEnabled";
 const AUTO_MATCH_EVENT = "JavDB.match115.autoMatchChanged";
 const RECHECK_UNMATCHED_EVENT = "JavDB.match115.recheckUnmatched";
 const RECHECK_STATUS_EVENT = "JavDB.match115.recheckStatusChanged";
+const MATCH_QUEUE_STATUS_EVENT = "JavDB.match115.queueStatusChanged";
+const UNKNOWN_TXT = "\u672a\u68c0\u6d4b";
+const METADATA_TXT = "\u8865\u5168\u4e2d";
 
 const isAutoMatchEnabled = () => GM_getValue(AUTO_MATCH_STORAGE_KEY, false) === true;
 
@@ -62,44 +65,79 @@ const initAutoMatchToggle = () => {
 
   const wrap = settings.closest("li") || settings.parentElement;
   if (!wrap?.parentElement) return false;
+  const navClass = settings.classList.contains("navbar-item") ? "navbar-item " : "";
+  const makeProgress = (nav, name) => {
+    const count = document.createElement("span");
+    const track = document.createElement("span");
+    const fill = document.createElement("span");
+    count.className = `x-match-queue-count x-${name}-queue-count`;
+    track.className = "x-match-queue-progress";
+    fill.className = "x-match-queue-progress-fill";
+    track.append(fill);
+    nav.append(count, track);
+    return { count, track, fill };
+  };
+  const updateProgress = (view, nav, detail, kind) => {
+    const { status = "idle", total = 0, probed = 0, completed = 0, metadataPending = 0, failed = 0 } = detail || {};
+    const isAuto = kind === "auto";
+    const numerator = isAuto ? probed : completed;
+    const active = total > 0 && status !== "idle" && status !== "cancelled";
+    const pct = total ? Math.round((numerator / total) * 100) : 0;
+    const prefix = isAuto ? `\u68c0\u6d4b ${probed}/${total}` : `\u91cd\u68c0 ${completed}/${total}`;
+    view.count.textContent = active ? `${prefix}${metadataPending ? ` \u00b7 \u8865\u5168 ${metadataPending}` : ""}${failed ? ` \u00b7 \u5931\u8d25 ${failed}` : ""}` : "";
+    view.fill.style.width = `${pct}%`;
+    nav.classList.toggle("is-queue-active", active);
+    nav.classList.toggle("is-queue-finished", status === "finished");
+    nav.title = active ? `${prefix}${metadataPending ? `\uff0c\u8865\u5168\u4e2d ${metadataPending}` : ""}` : "";
+  };
 
   const triggerWrap = wrap.tagName === "LI" ? document.createElement("li") : document.createElement("div");
   triggerWrap.className = "x-auto-match-nav";
   const trigger = document.createElement("a");
   const dot = document.createElement("span");
   trigger.href = VOID;
-  trigger.className = `${settings.classList.contains("navbar-item") ? "navbar-item " : ""}x-auto-match-trigger`;
+  trigger.className = `${navClass}x-auto-match-trigger`;
   trigger.textContent = "\u81ea\u52a8\u5339\u914d";
   dot.className = "x-auto-match-indicator";
   dot.setAttribute("aria-hidden", "true");
   trigger.append(dot);
   triggerWrap.append(trigger);
+  const autoView = makeProgress(triggerWrap, "auto");
   wrap.insertAdjacentElement("afterend", triggerWrap);
 
+  let recheck;
+  let recheckWrap;
+  let recheckView;
   if (document.querySelector(".movie-list")) {
-    const recheckWrap = wrap.tagName === "LI" ? document.createElement("li") : document.createElement("div");
-    const recheck = document.createElement("a");
-    const recheckDot = document.createElement("span");
-    recheckWrap.className = "x-recheck-unmatched-nav";
+    recheckWrap = wrap.tagName === "LI" ? document.createElement("li") : document.createElement("div");
+    recheck = document.createElement("a");
+    recheck.className = `${navClass}x-recheck-unmatched-trigger`;
     recheck.href = VOID;
-    recheck.className = `${settings.classList.contains("navbar-item") ? "navbar-item " : ""}x-recheck-unmatched-trigger`;
     recheck.textContent = "\u91cd\u68c0\u672a\u5339\u914d";
-    recheck.title = "\u91cd\u65b0\u68c0\u6d4b\u5f53\u524d\u9875\u5df2\u8bb0\u5f55\u4e3a\u672a\u5339\u914d\u7684\u5f71\u7247";
+    recheck.title = "\u91cd\u65b0\u68c0\u6d4b\u5f53\u524d\u9875\u53ca\u540e\u7eed\u7011\u5e03\u6d41\u5df2\u8bb0\u5f55\u4e3a\u672a\u5339\u914d\u7684\u5f71\u7247";
     recheck.addEventListener("click", (event) => {
       event.preventDefault();
       window.dispatchEvent(new CustomEvent(RECHECK_UNMATCHED_EVENT));
     });
+    const recheckDot = document.createElement("span");
     recheckDot.className = "x-recheck-unmatched-indicator";
     recheckDot.setAttribute("aria-hidden", "true");
     recheck.append(recheckDot);
+    recheckWrap.className = "x-recheck-unmatched-nav";
     recheckWrap.append(recheck);
+    recheckView = makeProgress(recheckWrap, "recheck");
     triggerWrap.insertAdjacentElement("afterend", recheckWrap);
     window.addEventListener(RECHECK_STATUS_EVENT, ({ detail }) => {
       const status = detail?.status || "idle";
-      recheck.classList.toggle("is-running", status === "running");
+      recheck.classList.toggle("is-running", status === "running" || status === "waiting");
       recheck.classList.toggle("is-finished", status === "finished");
     });
   }
+
+  window.addEventListener(MATCH_QUEUE_STATUS_EVENT, ({ detail }) => {
+    if (detail?.lane === "auto") updateProgress(autoView, triggerWrap, detail, "auto");
+    if (detail?.lane === "recheck" && recheckView) updateProgress(recheckView, recheckWrap, detail, "recheck");
+  });
 
   const render = (enabled) => {
     trigger.classList.toggle("is-active", enabled);
@@ -139,9 +177,10 @@ const MatchCache = (() => {
     && Array.isArray(value.data)
     && typeof value.revision === "number";
 
-  const makeRecord = (data, previous = null, updatedAt = Date.now()) => ({
+  const makeRecord = (data, previous = null, updatedAt = Date.now(), phase = "complete") => ({
     status: data.length ? "matched" : "unmatched",
     data,
+    phase: data.length ? phase : "complete",
     revision: (previous?.revision || 0) + 1,
     updatedAt,
     stateVersion: STATE_VERSION,
@@ -217,9 +256,19 @@ const MatchCache = (() => {
     GM_setValue(fullKey(cacheKey), value);
   };
 
+  // A positive video hit is durable before the slower directory/subtitle pass.
+  // Reloading the page can therefore resume enrichment without searching again.
+  const setMetadataPending = (key, data) => {
+    const cacheKey = normalize(key);
+    if (!cacheKey || !Array.isArray(data) || !data.length) return;
+    const value = makeRecord(data, mem.get(cacheKey) || GM_getValue(fullKey(cacheKey)), Date.now(), "metadata");
+    mem.set(cacheKey, value);
+    GM_setValue(fullKey(cacheKey), value);
+  };
+
   migrate();
   markLegacyUnmatchedForRecheck();
-  return { get, getRecord, set, del };
+  return { get, getRecord, set, setMetadataPending, del };
 })();
 
 
@@ -622,7 +671,7 @@ const getPageDetails = (dom = document) => {
   const CODE_SELECTORS = [".video-title", "strong"];
   const CODE_SELECTOR = CODE_SELECTORS.join(" ");
   const FORCE_MATCH_CLASS = "x-match-force";
-  const TARGET_HTML = `<a href="${VOID}" class="tag is-normal ${TARGET_CLASS}">${UNMATCHED_TXT}</a><button type="button" class="tag is-light ${FORCE_MATCH_CLASS} is-hidden" title="强制重新匹配 115" aria-label="强制重新匹配 115">↻</button>`;
+  const TARGET_HTML = `<a href="${VOID}" class="tag is-unknown ${TARGET_CLASS}">${UNKNOWN_TXT}</a><button type="button" class="tag is-light ${FORCE_MATCH_CLASS} is-hidden" title="强制重新匹配 115" aria-label="强制重新匹配 115">↻</button>`;
   const SUBTITLE_ICON_HTML = `<span class="tag x-match-subtitle" title="网盘目录内已有字幕" aria-label="网盘目录内已有字幕"><svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M2 12C2 8.22876 2 6.34315 3.17157 5.17157C4.34315 4 6.22876 4 10 4H14C17.7712 4 19.6569 4 20.8284 5.17157C22 6.34315 22 8.22876 22 12C22 15.7712 22 17.6569 20.8284 18.8284C19.6569 20 17.7712 20 14 20H10C6.22876 20 4.34315 20 3.17157 18.8284C2 17.6569 2 15.7712 2 12ZM6 15.25C5.58579 15.25 5.25 15.5858 5.25 16C5.25 16.4142 5.58579 16.75 6 16.75H10C10.4142 16.75 10.75 16.4142 10.75 16C10.75 15.5858 10.4142 15.25 10 15.25H6ZM7.75 13C7.75 12.5858 7.41421 12.25 7 12.25H6C5.58579 12.25 5.25 12.5858 5.25 13C5.25 13.4142 5.58579 13.75 6 13.75H7C7.41421 13.75 7.75 13.4142 7.75 13ZM11.5 12.25C11.9142 12.25 12.25 12.5858 12.25 13C12.25 13.4142 11.9142 13.75 11.5 13.75H9.5C9.08579 13.75 8.75 13.4142 8.75 13C8.75 12.5858 9.08579 12.25 9.5 12.25H11.5ZM18.75 13C18.75 12.5858 18.4142 12.25 18 12.25H14C13.5858 12.25 13.25 12.5858 13.25 13C13.25 13.4142 13.5858 13.75 14 13.75H18C18.4142 13.75 18.75 13.4142 18.75 13ZM12.5 15.25C12.0858 15.25 11.75 15.5858 11.75 16C11.75 16.4142 12.0858 16.75 12.5 16.75H14C14.4142 16.75 14.75 16.4142 14.75 16C14.75 15.5858 14.4142 15.25 14 15.25H12.5ZM15.75 16C15.75 15.5858 16.0858 15.25 16.5 15.25H18C18.4142 15.25 18.75 15.5858 18.75 16C18.75 16.4142 18.4142 16.75 18 16.75H16.5C16.0858 16.75 15.75 16.4142 15.75 16Z" fill="currentColor"></path></svg></span>`;
   const MATCH_TYPE_COLORS = {
     normal: "var(--x-success)",
@@ -727,6 +776,19 @@ const getPageDetails = (dom = document) => {
     if (forceButton) forceButton.disabled = false;
   };
 
+  const setMatchTag = ({ target }, text, className, title = "") => {
+    const node = target.querySelector(`.${TARGET_CLASS}`);
+    if (!node) return;
+    node.className = `tag ${className} ${TARGET_CLASS}`;
+    node.textContent = text;
+    node.title = title;
+    node.dataset.pc = "";
+    node.dataset.cid = "";
+  };
+
+  const renderUnknown = (details) => setMatchTag(details, UNKNOWN_TXT, "is-unknown", "\u5c1a\u672a\u68c0\u6d4b 115 \u662f\u5426\u5b58\u5728\u89c6\u9891");
+  const renderMetadataPending = (details) => setMatchTag(details, METADATA_TXT, "is-metadata-pending", "\u5df2\u53d1\u73b0\u89c6\u9891\uff0c\u6b63\u5728\u8865\u5168\u76ee\u5f55\u3001\u5c01\u9762\u548c\u5b57\u5e55\u4fe1\u606f");
+
   const matchBefore = (node) => {
     if (node.classList.contains("is-hidden")) return;
 
@@ -745,173 +807,300 @@ const getPageDetails = (dom = document) => {
 
   const useMatchQueue = (before, after) => {
     const wait = {};
-    const queue = [];
+    const probeQueues = { auto: [], recheck: [], normal: [] };
+    const queuedKeys = new Map();
+    const metadataQueue = [];
+    const stats = {
+      auto: { total: 0, probed: 0, completed: 0, metadataPending: 0, failed: 0, status: "idle" },
+      recheck: { total: 0, probed: 0, completed: 0, metadataPending: 0, failed: 0, status: "idle" },
+    };
     let loading = false;
+    let metadataLoading = false;
+    let metadataCurrent = null;
 
-    const over = async (key, data = [], shouldCache = false) => {
-      const pending = wait[key] || [];
-      delete wait[key];
-      await Promise.all(pending.map(async (it) => {
-        try {
-          const scoped = data.filter((file) => it.regex.test(file.n));
-          const enriched = await enrichMetadata(scoped, it);
+    const laneOf = ({ auto, recheck }) => recheck ? "recheck" : auto ? "auto" : "normal";
+    const emit = (lane, status = null) => {
+      if (lane === "normal") return;
+      const state = stats[lane];
+      if (status) state.status = status;
+      window.dispatchEvent(new CustomEvent(MATCH_QUEUE_STATUS_EVENT, { detail: { lane, ...state } }));
+    };
+    const trackQueued = (it) => {
+      if (it.lane === "normal" || it.tracked) return;
+      it.tracked = true;
+      const state = stats[it.lane];
+      state.total += 1;
+      state.status = "running";
+      emit(it.lane);
+    };
+    const trackProbe = (it) => {
+      if (it.lane === "normal" || it.probed) return;
+      it.probed = true;
+      stats[it.lane].probed += 1;
+      emit(it.lane);
+    };
+    const trackMetadata = (it) => {
+      if (it.lane === "normal" || it.metadataTracked) return;
+      it.metadataTracked = true;
+      stats[it.lane].metadataPending += 1;
+      emit(it.lane);
+    };
+    const settleItem = (it, { failed = false } = {}) => {
+      if (it.settled) return;
+      it.settled = true;
+      if (it.lane !== "normal") {
+        const state = stats[it.lane];
+        if (it.metadataTracked) state.metadataPending = Math.max(0, state.metadataPending - 1);
+        state.completed += 1;
+        if (failed) state.failed += 1;
+        if (state.completed >= state.total) state.status = "finished";
+        emit(it.lane);
+      }
+      it.onSettled?.(it);
+    };
+    const resetCancelledAutoItem = (it) => {
+      it.cancelled = true;
+      const card = it.target.closest(MOVIE_SELECTOR);
+      delete card?.dataset.matchPending;
+      if (it.recheck || it.auto) renderUnknown(it);
+      settleItem(it);
+    };
+    const enqueueProbe = (searchKey, lane) => {
+      const existing = queuedKeys.get(searchKey);
+      if (existing) {
+        if (lane === "auto" && existing.lane !== "auto") {
+          const source = probeQueues[existing.lane];
+          const index = source.indexOf(existing);
+          if (index >= 0) source.splice(index, 1);
+          existing.lane = "auto";
+          probeQueues.auto.push(existing);
+        }
+        return;
+      }
+      const job = { searchKey, lane };
+      queuedKeys.set(searchKey, job);
+      probeQueues[lane].push(job);
+    };
+    const nextProbe = () => probeQueues.auto.shift() || probeQueues.recheck.shift() || probeQueues.normal.shift();
+
+    const drainMetadata = async () => {
+      if (metadataLoading || !metadataQueue.length) return;
+      metadataLoading = true;
+      const job = metadataQueue.shift();
+      metadataCurrent = job;
+      const { it, scoped, shouldCache } = job;
+      let failed = false;
+      try {
+        const enriched = await enrichMetadata(scoped, it);
+        if (!it.cancelled) {
           if (shouldCache) MatchCache.set(it.code, enriched);
           after?.(it, enriched);
-        } finally {
-          it.onSettled?.();
         }
-      }));
+      } catch (err) {
+        failed = true;
+        // Preserve the durable positive hit.  A retry can resume metadata work
+        // without incorrectly replacing it with an empty match result.
+        if (!it.cancelled) {
+          delete it.target.closest(MOVIE_SELECTOR)?.dataset.matchPending;
+          renderMetadataPending(it);
+          Util.print(err?.message);
+        }
+      } finally {
+        metadataCurrent = null;
+        metadataLoading = false;
+        settleItem(it, { failed });
+        drainMetadata();
+      }
     };
-
+    const enqueueMetadata = (it, scoped, shouldCache = true) => {
+      trackMetadata(it);
+      metadataQueue.push({ it, scoped, shouldCache });
+      drainMetadata();
+    };
+    const resolveSearch = (key, data = []) => {
+      const pending = wait[key] || [];
+      delete wait[key];
+      pending.forEach((it) => {
+        const scoped = data.filter((file) => it.regex.test(file.n));
+        trackProbe(it);
+        if (!scoped.length) {
+          if (!it.cancelled) {
+            MatchCache.set(it.code, []);
+            after?.(it, []);
+          }
+          settleItem(it);
+          return;
+        }
+        if (!it.cancelled) {
+          MatchCache.setMetadataPending(it.code, scoped);
+          renderMetadataPending(it);
+          enqueueMetadata(it, scoped, true);
+        } else {
+          settleItem(it);
+        }
+      });
+    };
     const match = async () => {
-      if (loading || !queue.length) return;
-      const searchKey = queue.shift();
-      // Auto-match can be disabled while entries are waiting in the queue.
-      // Skip an empty batch instead of issuing another 115 search.
+      if (loading) return;
+      const job = nextProbe();
+      if (!job) return;
+      const { searchKey } = job;
+      queuedKeys.delete(searchKey);
       if (!wait[searchKey]?.length) return match();
       loading = true;
-
-      let completion;
       try {
         const { data = [] } = await Req115.filesSearchAllVideos(searchKey);
         const pendingItems = wait[searchKey] || [];
         const matchedData = data.filter((item) => pendingItems.some(({ regex }) => regex.test(item.n)));
-        const sources = extractData(matchedData);
-        completion = over(searchKey, sources, true);
+        resolveSearch(searchKey, extractData(matchedData));
       } catch (err) {
-        completion = over(searchKey);
+        // Search failures retain the prior local state instead of writing a
+        // false negative result.
+        const pending = wait[searchKey] || [];
+        delete wait[searchKey];
+        pending.forEach((it) => {
+          trackProbe(it);
+          if (!it.cancelled) {
+            const record = MatchCache.getRecord(it.code) ?? MatchCache.getRecord(it.prefix);
+            if (record?.phase === "metadata") renderMetadataPending(it);
+            else if (record?.status === "unmatched") after?.(it, []);
+            else renderUnknown(it);
+          }
+          settleItem(it, { failed: true });
+        });
         Util.print(err?.message);
       }
-
       loading = false;
-      // A card is still rendered only after its complete directory/subtitle
-      // metadata arrives, but that enrichment no longer blocks the next
-      // serialized 115 video search.
       match();
-      await completion?.catch((err) => Util.print(err?.message));
     };
-
-    const dispatch = (node, force = false, cacheOnly = false, auto = false, recheck = false, onSettled = null, priority = false) => {
+    const dispatch = (node, { force = false, cacheOnly = false, auto = false, recheck = false, onSettled = null } = {}) => {
       if (auto && !isAutoMatchEnabled()) return;
-      if (force) {
-        delete node.dataset.matchPending;
-        delete node.dataset.matchResolved;
-      }
       const details = before?.(node);
       if (!details) return;
-
       const { code, prefix, searchKey } = details;
       const record = MatchCache.getRecord(code) ?? MatchCache.getRecord(prefix);
       const recheckLegacyEmpty = auto && record?.needsRecheck === true;
-      if (force || recheck || recheckLegacyEmpty) {
+      const refreshStoredResult = force || recheck || recheckLegacyEmpty;
+      if (cacheOnly && record?.data) return after?.(details, record.data);
+      if (node.dataset.matchPending === "1" || (node.dataset.matchResolved === "1" && !refreshStoredResult)) return;
+      if (record?.phase === "metadata" && !refreshStoredResult) {
+        renderMetadataPending(details);
+        if (!auto) return;
+        const it = { ...details, auto, recheck, onSettled, lane: laneOf({ auto, recheck }), settled: false, cancelled: false };
+        node.dataset.matchPending = "1";
+        trackQueued(it);
+        enqueueMetadata(it, record.data.filter((file) => it.regex.test(file.n)), true);
+        return;
+      }
+      if (record?.data && !refreshStoredResult) return after?.(details, record.data);
+      if (refreshStoredResult) {
         delete node.dataset.matchPending;
         delete node.dataset.matchResolved;
       }
-      if (node.dataset.matchPending === "1" || node.dataset.matchResolved === "1") return;
-
-      if (recheck) {
-        const tag = details.target.querySelector(`.${TARGET_CLASS}`);
-        if (tag) {
-          tag.textContent = TARGET_TXT;
-          tag.title = "";
-        }
-      }
-
+      const it = { ...details, auto, recheck, onSettled, lane: laneOf({ auto, recheck }), settled: false, cancelled: false };
       node.dataset.matchPending = "1";
-
-      const cache = record?.data ?? null;
-      if (cache !== null && !recheck && !recheckLegacyEmpty) {
-        // Cached rows already include the fields needed to render the card.
-        // Do not turn a page refresh into one directory request per matched item.
-        return after?.(details, cache);
-      }
-
+      setMatchTag(it, TARGET_TXT, "is-normal");
+      trackQueued(it);
       if (!wait[searchKey]) wait[searchKey] = [];
-      wait[searchKey].push({ ...details, auto, onSettled });
-
-      const queuedAt = queue.indexOf(searchKey);
-      if (queuedAt >= 0) {
-        if (priority && queuedAt > 0) queue.unshift(queue.splice(queuedAt, 1)[0]);
-        return;
-      }
-      if (priority) queue.unshift(searchKey);
-      else queue.push(searchKey);
+      wait[searchKey].push(it);
+      enqueueProbe(searchKey, it.lane);
       match();
     };
-
-    const callback = (entries, obs) => {
-      entries.forEach(({ isIntersecting, target }) => {
-        if (isIntersecting) obs.unobserve(target) || requestAnimationFrame(() => dispatch(target, false, false, true, false, null, true));
-      });
-    };
-
+    const callback = (entries, obs) => entries.forEach(({ isIntersecting, target }) => {
+      if (isIntersecting) obs.unobserve(target) || requestAnimationFrame(() => dispatch(target, { auto: true }));
+    });
     const obs = new IntersectionObserver(callback, { threshold: 0.25 });
     const cancelAuto = () => {
       Object.entries(wait).forEach(([key, pending]) => {
         const keep = pending.filter((it) => {
           if (!it.auto) return true;
-          const card = it.target.closest(MOVIE_SELECTOR);
-          delete card?.dataset.matchPending;
-          if (it.recheck) {
-            const tag = it.target.querySelector(`.${TARGET_CLASS}`);
-            if (tag) {
-              tag.textContent = UNMATCHED_TXT;
-              tag.title = "";
-            }
-          }
-          it.onSettled?.();
+          resetCancelledAutoItem(it);
           return false;
         });
         if (keep.length) wait[key] = keep;
         else delete wait[key];
       });
+      metadataQueue.splice(0).forEach((job) => {
+        if (job.it.auto) resetCancelledAutoItem(job.it);
+        else metadataQueue.push(job);
+      });
+      if (metadataCurrent?.it.auto) resetCancelledAutoItem(metadataCurrent.it);
+      stats.auto = { total: 0, probed: 0, completed: 0, metadataPending: 0, failed: 0, status: "cancelled" };
+      emit("auto");
     };
-    const enqueue = (nodeList, { force = false, cacheOnly = false, auto = false, immediate = false, recheck = false, onSettled = null, priority = false } = {}) => nodeList.forEach((node) => {
-      // A forced refresh commonly comes from Quick View closing.  The card is
-      // already in the viewport and has been unobserved, so it must bypass
-      // IntersectionObserver and enter the queue directly.
-      // Enabling auto-match is also immediate: cards already visible before
-      // the observer was attached must enter the queue without a page reload.
-      if (force || immediate) return requestAnimationFrame(() => dispatch(node, force, cacheOnly, auto, recheck, onSettled, priority));
-      // Matched-only actor mode hides unmatched cards, so they never intersect.
-      // Queue them immediately to resolve their match state before CSS decides visibility.
-      if (document.documentElement.classList.contains("x-actor-matched-only")) {
-        requestAnimationFrame(() => dispatch(node, force, cacheOnly, auto, recheck, onSettled, priority));
+    const enqueue = (nodeList, options = {}) => [...nodeList].forEach((node) => {
+      const { force = false, immediate = false } = options;
+      if (force || immediate || document.documentElement.classList.contains("x-actor-matched-only")) {
+        requestAnimationFrame(() => dispatch(node, options));
       } else {
         obs.observe(node);
       }
     });
-    return { enqueue, cancelAuto };
+    const setLaneStatus = (lane, status) => {
+      if (lane !== "normal") emit(lane, status);
+    };
+    return { enqueue, cancelAuto, setLaneStatus };
   };
 
-  const { enqueue: matchQueue, cancelAuto: cancelAutoMatchQueue } = useMatchQueue(matchBefore, matchAfter);
+  const { enqueue: matchQueue, cancelAuto: cancelAutoMatchQueue, setLaneStatus } = useMatchQueue(matchBefore, matchAfter);
   const handledSyncs = new Set();
-  const prioritizeVisibleCards = (nodes) => [...nodes].sort((left, right) => {
-    const distance = (node) => {
-      const rect = node.getBoundingClientRect();
-      if (rect.bottom >= 0 && rect.top <= window.innerHeight) return 0;
-      return Math.min(Math.abs(rect.top), Math.abs(rect.bottom - window.innerHeight));
-    };
-    return distance(left) - distance(right);
-  });
-  // Keep existing card-level refresh controls available while automatic 115
-  // lookups are off.  Cached state still renders locally without a request.
+  let recheckSession = null;
+
   const hydrateMatchCard = (node) => {
     const details = matchBefore(node);
     if (!details) return;
-    const cache = MatchCache.get(details.code) ?? MatchCache.get(details.prefix);
-    if (cache !== null) matchAfter(details, cache);
+    const record = MatchCache.getRecord(details.code) ?? MatchCache.getRecord(details.prefix);
+    if (!record) return renderUnknown(details);
+    if (record.phase === "metadata") return renderMetadataPending(details);
+    matchAfter(details, record.data);
+  };
+  const finishRecheckWhenExhausted = () => {
+    if (!recheckSession?.active) return;
+    if (recheckSession.pending > 0) return;
+    const load = document.querySelector(".x-load");
+    const noMore = !load || /\u6682\u65e0\u66f4\u591a/.test(load.textContent || "");
+    if (!noMore) {
+      setLaneStatus("recheck", "waiting");
+      window.dispatchEvent(new CustomEvent(RECHECK_STATUS_EVENT, { detail: { status: "waiting" } }));
+      return;
+    }
+    recheckSession.active = false;
+    setLaneStatus("recheck", "finished");
+    window.dispatchEvent(new CustomEvent(RECHECK_STATUS_EVENT, { detail: { status: "finished" } }));
+  };
+  const collectRecheckCards = (nodes) => {
+    if (!recheckSession?.active || !isAutoMatchEnabled()) return;
+    const cards = [...nodes].filter((node) => {
+      if (!node.matches?.(MOVIE_SELECTOR) || node.dataset.recheckSession === recheckSession.id) return false;
+      const details = matchBefore(node);
+      if (!details || node.dataset.matchPending === "1") return false;
+      const record = MatchCache.getRecord(details.code) ?? MatchCache.getRecord(details.prefix);
+      // A continuous recheck only picks up records that were already known to
+      // be empty when the session began. Newly probed unknown cards never get
+      // searched twice in the same page run.
+      if (record?.status !== "unmatched" || Number(record.updatedAt || 0) > recheckSession.startedAt) return false;
+      node.dataset.recheckSession = recheckSession.id;
+      return true;
+    });
+    if (!cards.length) return;
+    recheckSession.pending += cards.length;
+    setLaneStatus("recheck", "running");
+    window.dispatchEvent(new CustomEvent(RECHECK_STATUS_EVENT, { detail: { status: "running" } }));
+    matchQueue(cards, {
+      force: true,
+      immediate: true,
+      auto: true,
+      recheck: true,
+      onSettled: () => {
+        if (recheckSession) recheckSession.pending = Math.max(0, recheckSession.pending - 1);
+        requestAnimationFrame(finishRecheckWhenExhausted);
+      },
+    });
   };
   movieList.forEach(hydrateMatchCard);
-  if (isAutoMatchEnabled()) matchQueue(prioritizeVisibleCards(movieList), { auto: true });
+  if (isAutoMatchEnabled()) matchQueue(movieList, { auto: true, immediate: true });
 
-  window.addEventListener("JavDB.scroll", ({ detail }) => {
-    if (isAutoMatchEnabled()) matchQueue(prioritizeVisibleCards(detail), { auto: true, priority: true });
-  });
-  // Rankings and other in-page modules can create cards before this userscript
-  // has attached its custom-event listener.  Observe additions as a durable
-  // fallback so every normal `.movie-list .item` gets the same match UI.
-  const matchDynamicCards = (nodes) => {
+  const handleIncomingCards = (nodes) => {
     const cards = [];
     nodes.forEach((node) => {
       if (node.nodeType !== Node.ELEMENT_NODE) return;
@@ -920,41 +1109,39 @@ const getPageDetails = (dom = document) => {
     });
     if (!cards.length) return;
     cards.forEach(hydrateMatchCard);
-    if (isAutoMatchEnabled()) matchQueue(prioritizeVisibleCards(cards), { auto: true, priority: true });
+    collectRecheckCards(cards);
+    if (isAutoMatchEnabled()) matchQueue(cards, { auto: true, immediate: true });
   };
-  new MutationObserver((records) => records.forEach((record) => matchDynamicCards(record.addedNodes)))
+  window.addEventListener("JavDB.scroll", ({ detail }) => {
+    // The mutation observer is the durable fallback; the card flags in the
+    // queue/session make receiving both signals harmless.
+    handleIncomingCards(detail);
+    requestAnimationFrame(finishRecheckWhenExhausted);
+  });
+  new MutationObserver((records) => records.forEach((record) => handleIncomingCards(record.addedNodes)))
     .observe(document.body, { childList: true, subtree: true });
   window.addEventListener(AUTO_MATCH_EVENT, ({ detail }) => {
-    if (detail?.enabled) matchQueue(prioritizeVisibleCards(document.querySelectorAll(MOVIE_SELECTOR)), { auto: true, immediate: true });
-    else cancelAutoMatchQueue();
+    if (detail?.enabled) matchQueue(document.querySelectorAll(MOVIE_SELECTOR), { auto: true, immediate: true });
+    else {
+      recheckSession = null;
+      cancelAutoMatchQueue();
+      setLaneStatus("recheck", "cancelled");
+      window.dispatchEvent(new CustomEvent(RECHECK_STATUS_EVENT, { detail: { status: "idle" } }));
+    }
   });
   window.addEventListener(RECHECK_UNMATCHED_EVENT, () => {
     if (!isAutoMatchEnabled()) {
       Util.print("\u8bf7\u5148\u5f00\u542f\u81ea\u52a8\u5339\u914d");
       return;
     }
-    const cards = [...document.querySelectorAll(MOVIE_SELECTOR)].flatMap((node) => {
-      const details = matchBefore(node);
-      if (!details) return [];
-      const record = MatchCache.getRecord(details.code) ?? MatchCache.getRecord(details.prefix);
-      // The "未匹配" label can mean either a stored empty result or no local
-      // state at all.  Recheck both, while never disturbing a matched record.
-      if (record?.status === "matched") return [];
-      MatchCache.del(details.code);
-      return [node];
-    });
-    if (!cards.length) {
-      Util.print("\u5f53\u524d\u9875\u6ca1\u6709\u9700\u8981\u91cd\u68c0\u7684\u672a\u5339\u914d\u5f71\u7247");
-      return;
+    if (!recheckSession?.active) {
+      recheckSession = { id: crypto.randomUUID(), startedAt: Date.now(), active: true, pending: 0 };
+      window.dispatchEvent(new CustomEvent(RECHECK_STATUS_EVENT, { detail: { status: "running" } }));
     }
-    let remaining = cards.length;
-    window.dispatchEvent(new CustomEvent(RECHECK_STATUS_EVENT, { detail: { status: "running" } }));
-    const onSettled = () => {
-      remaining -= 1;
-      if (remaining === 0) window.dispatchEvent(new CustomEvent(RECHECK_STATUS_EVENT, { detail: { status: "finished" } }));
-    };
-    matchQueue(cards, { force: true, immediate: true, auto: true, recheck: true, onSettled });
+    collectRecheckCards(document.querySelectorAll(MOVIE_SELECTOR));
+    requestAnimationFrame(finishRecheckWhenExhausted);
   });
+
   const receiveMatchState = (data) => {
     const payload = typeof data === "string" ? { code: data } : data;
     if (!payload?.code) return;
@@ -978,8 +1165,20 @@ const getPageDetails = (dom = document) => {
   });
 
   const publish = (code) => {
-    // A manual refresh deliberately replaces an already resolved result.
-    matchQueue(document.querySelectorAll(`.${parseCodeCls(code)}`), { force: true });
+    const nodes = document.querySelectorAll(`.${parseCodeCls(code)}`);
+    let hasLocalResult = false;
+    nodes.forEach((node) => {
+      const details = matchBefore(node);
+      const cache = details && (MatchCache.get(details.code) ?? MatchCache.get(details.prefix));
+      if (details && cache?.data) {
+        hasLocalResult = true;
+        matchAfter(details, cache.data);
+      }
+    });
+    // Left-click keeps its original cache-refresh fallback for cards that have
+    // never been searched. A completed manual search has local data and does
+    // not enter the normal waterfall queue a second time.
+    if (!hasLocalResult) matchQueue(nodes, { force: true, immediate: true });
     CHANNEL.postMessage(code);
   };
 
@@ -994,6 +1193,7 @@ const getPageDetails = (dom = document) => {
     const details = {
       ...Util.codeParse(code),
       isVR: isVrTitle(movie.querySelector(".video-title")?.textContent),
+      target,
     };
     const { codes, regex } = details;
     const UUID = crypto.randomUUID();
@@ -1005,8 +1205,12 @@ const getPageDetails = (dom = document) => {
 
       const sources = await enrichMetadata(extractData(data.filter((it) => regex.test(it.n))), details);
       MatchCache.set(code, sources);
+      matchAfter(details, sources);
     } catch (err) {
       if (target.dataset.uid !== UUID) return;
+      const cached = MatchCache.get(code) ?? MatchCache.get(details.prefix);
+      if (cached) matchAfter(details, cached);
+      else renderUnknown(details);
       Util.print(err?.message);
     }
 
@@ -1041,14 +1245,14 @@ const getPageDetails = (dom = document) => {
 
     button.disabled = true;
     button.classList.add("is-loading");
-    // Delete only this card's stored state, then return to the normal match queue.
+    // Delete only this card's stored state, then use the direct manual channel.
     MatchCache.del(code);
     target.className = `tag is-normal ${TARGET_CLASS}`;
     target.dataset.pc = "";
     target.dataset.cid = "";
     target.textContent = TARGET_TXT;
     target.title = "";
-    matchQueue([movie], { force: true });
+    matchCode(target);
   };
 
   unsafeWindow[MATCH_API] = matchCode;
