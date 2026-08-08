@@ -245,8 +245,13 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     return actor ? ["演员", actor, title] : this.buildTargetDir(details);
   }
 
-  static buildArchiveDir(details = {}, mode = "actor") {
-    return mode === "code" ? this.buildTargetDir(details) : this.buildActorTargetDir(details);
+  static buildArchiveDir(details = {}, mode = "actor", files = []) {
+    const base = mode === "code" ? this.buildTargetDir(details) : this.buildActorTargetDir(details);
+    const title = this.buildRename(details, files);
+    // The final directory segment and its video files describe the same
+    // release.  Keep subtitle/crack/leak tags on both, rather than leaving
+    // the archive-folder preview with an untagged title.
+    return title ? [...base.slice(0, -1), title] : base;
   }
 
   static buildRename(details = {}, files = []) {
@@ -272,11 +277,12 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     return files.map((file) => ({ ...file, n: names.get(String(file.fid)) || file.n }));
   }
 
-  static buildPreview(details = {}, file = {}, mode = "rename") {
+  static buildPreview(details = {}, file = {}, mode = "rename", files = []) {
     const normalized = this.normalizeFile(file);
-    const rename = this.buildRename(details, [normalized]);
+    const sourceFiles = files.length ? files : [normalized];
+    const rename = this.buildRename(details, sourceFiles);
     const lines = [];
-    if (mode !== "rename") lines.push(this.formatHoverLine("目录", this.buildArchiveDir(details, mode).join("/")));
+    if (mode !== "rename") lines.push(this.formatHoverLine("目录", this.buildArchiveDir(details, mode, sourceFiles).join("/")));
     lines.push(this.formatHoverLine("视频", `${rename}.${normalized.ico}`));
     if (mode !== "rename") lines.push("同目录字幕会一并移动并按相同规则命名");
     return lines.join("\n");
@@ -292,10 +298,10 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     const safeName = this.escapeHtml(displayName);
     const safePath = this.escapeHtml(path);
     const safeTip = this.escapeHtml(tip);
-    const safeActorDir = this.escapeHtml(this.buildArchiveDir(details, "actor").join("/"));
-    const safeCodeDir = this.escapeHtml(this.buildArchiveDir(details, "code").join("/"));
-    const safeActorPreview = this.escapeHtml(this.buildPreview(details, file, "actor"));
-    const safeCodePreview = this.escapeHtml(this.buildPreview(details, file, "code"));
+    const safeActorDir = this.escapeHtml(this.buildArchiveDir(details, "actor", members).join("/"));
+    const safeCodeDir = this.escapeHtml(this.buildArchiveDir(details, "code", members).join("/"));
+    const safeActorPreview = this.escapeHtml(this.buildPreview(details, file, "actor", members));
+    const safeCodePreview = this.escapeHtml(this.buildPreview(details, file, "code", members));
     const safeRenamePreview = this.escapeHtml(this.buildPreview(details, file));
     const safeSubtitleFiles = this.escapeHtml(JSON.stringify(file.subtitleFiles || []));
     const safeMembers = this.escapeHtml(JSON.stringify(members));
@@ -341,7 +347,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
   static async archiveMatchedNow({ req115, item, details, dir }) {
     const file = this.normalizeFile(item);
     const videos = this.getBundleMembers(item);
-    const targetDir = (dir?.length ? dir : this.buildTargetDir(details)).map((part) => this.sanitizeName(part)).filter(Boolean);
+    const targetDir = (dir?.length ? dir : this.buildArchiveDir(details, "code", videos)).map((part) => this.sanitizeName(part)).filter(Boolean);
     const targetCid = await req115.handleDir(targetDir);
     if (!targetCid) throw new Error("目标目录创建失败");
 

@@ -238,7 +238,9 @@ body:has(.x-load) #footer,
   display: none;
   min-width: max-content;
   padding: 0;
-  color: inherit;
+  /* Queue counts sit underneath the dark button text, not the navbar's white
+     inherited foreground. */
+  color: #000 !important;
   font-size: .68rem;
   font-variant-numeric: tabular-nums;
   line-height: 1;
