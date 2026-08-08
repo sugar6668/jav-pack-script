@@ -231,14 +231,20 @@ body:has(.x-load) #footer,
 }
 
 .x-match-queue-count {
+  position: absolute;
+  z-index: 1;
+  bottom: .48rem;
+  left: 50%;
   display: none;
-  align-items: center;
   min-width: max-content;
-  padding: 0 .42rem .08rem;
-  color: rgb(255 255 255 / 72%);
+  padding: 0;
+  color: inherit;
   font-size: .68rem;
   font-variant-numeric: tabular-nums;
+  line-height: 1;
   pointer-events: none;
+  transform: translateX(-50%);
+  white-space: nowrap;
 }
 
 .x-auto-match-nav.is-queue-active .x-auto-queue-count,
@@ -249,7 +255,7 @@ body:has(.x-load) #footer,
 .x-match-queue-progress {
   position: absolute;
   right: .5rem;
-  bottom: 0;
+  bottom: .12rem;
   left: .5rem;
   height: 3px;
   overflow: hidden;
