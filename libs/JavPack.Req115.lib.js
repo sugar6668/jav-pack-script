@@ -371,15 +371,16 @@ class Req115 extends Drive115 {
 
   static request(config) {
     if (!this.is115Request(config)) return super.request(config);
+    const { skipMatchQueue = false, ...requestConfig } = config;
     const execute = async () => {
-      const response = await super.request(config);
+      const response = await super.request(requestConfig);
       if (this.isRiskResponse(response)) this.pauseRequests(response.error_msg || response.message || "115 需要安全验证");
       return response;
     };
     // Page matching is the only automatic high-fan-out path.  Keep those
     // searches serialized at one second globally across JavDB tabs; archive/
     // offline internals stay outside this read-search coordinator.
-    return this.isMatchSearchRequest(config) ? this.queue115Request(execute) : execute();
+    return this.isMatchSearchRequest(requestConfig) && !skipMatchQueue ? this.queue115Request(execute) : execute();
   }
 
   static getMutationCoordinator() {

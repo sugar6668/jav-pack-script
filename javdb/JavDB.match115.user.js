@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.28
+// @version         0.0.31
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -44,6 +44,14 @@ const RECHECK_STATUS_EVENT = "JavDB.match115.recheckStatusChanged";
 const MATCH_QUEUE_STATUS_EVENT = "JavDB.match115.queueStatusChanged";
 const UNKNOWN_TXT = "\u672a\u68c0\u6d4b";
 const METADATA_TXT = "\u8865\u5168\u4e2d";
+const MATCH_REQUEST_TIMEOUT = 45 * 1000;
+const withMatchTimeout = (promise, message = "115 匹配请求超时") => new Promise((resolve, reject) => {
+  const timer = setTimeout(() => reject(new Error(message)), MATCH_REQUEST_TIMEOUT);
+  Promise.resolve(promise).then(
+    (value) => { clearTimeout(timer); resolve(value); },
+    (err) => { clearTimeout(timer); reject(err); },
+  );
+});
 
 const isAutoMatchEnabled = () => GM_getValue(AUTO_MATCH_STORAGE_KEY, false) === true;
 
@@ -512,7 +520,9 @@ const getPageDetails = (dom = document) => {
     load.dataset.uid = UUID;
 
     try {
-      const { data = [] } = await Req115.filesSearchAllVideos(codes.join(" "));
+      // Context-menu matching is an explicit one-card action.  It must not
+      // wait behind the waterfall/recheck search coordinator.
+      const { data = [] } = await withMatchTimeout(Req115.filesSearchAllVideos(codes.join(" "), { skipMatchQueue: true }));
       if (load.dataset.uid !== UUID) return;
 
       const sources = await enrichMetadata(extractData(data.filter((it) => regex.test(it.n))), { code, codes, regex });
@@ -733,6 +743,7 @@ const getPageDetails = (dom = document) => {
   const matchAfter = ({ code, regex, target }, data) => {
     const itemNode = target.closest(MOVIE_SELECTOR);
     delete itemNode.dataset.matchPending;
+    delete target.dataset.manualMatchPending;
     itemNode.dataset.matchResolved = "1";
     itemNode.classList.add(parseCodeCls(code));
     const sources = data.filter((it) => regex.test(it.n));
@@ -796,7 +807,10 @@ const getPageDetails = (dom = document) => {
     node.dataset.cid = "";
   };
 
-  const renderUnknown = (details) => setMatchTag(details, UNKNOWN_TXT, "is-unknown", "\u5c1a\u672a\u68c0\u6d4b 115 \u662f\u5426\u5b58\u5728\u89c6\u9891");
+  const renderUnknown = (details) => {
+    delete details.target?.dataset.manualMatchPending;
+    setMatchTag(details, UNKNOWN_TXT, "is-unknown", "\u5c1a\u672a\u68c0\u6d4b 115 \u662f\u5426\u5b58\u5728\u89c6\u9891");
+  };
   const renderMetadataPending = (details) => setMatchTag(details, METADATA_TXT, "is-metadata-pending", "\u5df2\u53d1\u73b0\u89c6\u9891\uff0c\u6b63\u5728\u8865\u5168\u76ee\u5f55\u3001\u5c01\u9762\u548c\u5b57\u5e55\u4fe1\u606f");
 
   const matchBefore = (node) => {
@@ -814,6 +828,23 @@ const getPageDetails = (dom = document) => {
     const parsed = Util.codeParse(code);
     target.dataset.isVr = isVrTitle(target.textContent) ? "1" : "";
     return { ...parsed, searchKey: parsed.codes.join(" "), target };
+  };
+  const armManualMatchRecovery = (target) => {
+    const id = crypto.randomUUID();
+    target.dataset.manualMatchPending = id;
+    setTimeout(() => {
+      if (target.dataset.manualMatchPending !== id) return;
+      const card = target.closest(MOVIE_SELECTOR);
+      const details = card && matchBefore(card);
+      if (!details) return;
+      delete target.dataset.manualMatchPending;
+      delete card.dataset.matchPending;
+      const record = MatchCache.getRecord(details.code) ?? MatchCache.getRecord(details.prefix);
+      if (record?.phase === "metadata") renderMetadataPending(details);
+      else if (record?.data) matchAfter(details, record.data);
+      else renderUnknown(details);
+      Util.print("115 匹配请求超时，已恢复为可重试状态");
+    }, MATCH_REQUEST_TIMEOUT);
   };
 
   const useMatchQueue = (before, after) => {
@@ -960,7 +991,7 @@ const getPageDetails = (dom = document) => {
       if (!wait[searchKey]?.length) return match();
       loading = true;
       try {
-        const { data = [] } = await Req115.filesSearchAllVideos(searchKey);
+        const { data = [] } = await withMatchTimeout(Req115.filesSearchAllVideos(searchKey));
         const pendingItems = wait[searchKey] || [];
         const matchedData = data.filter((item) => pendingItems.some(({ regex }) => regex.test(item.n)));
         resolveSearch(searchKey, extractData(matchedData));
@@ -1217,9 +1248,10 @@ const getPageDetails = (dom = document) => {
     const { codes, regex } = details;
     const UUID = crypto.randomUUID();
     target.dataset.uid = UUID;
+    armManualMatchRecovery(target);
 
     try {
-      const { data = [] } = await Req115.filesSearchAllVideos(codes.join(" "));
+      const { data = [] } = await withMatchTimeout(Req115.filesSearchAllVideos(codes.join(" "), { skipMatchQueue: true }));
       if (target.dataset.uid !== UUID) return;
 
       const sources = await enrichMetadata(extractData(data.filter((it) => regex.test(it.n))), details);
@@ -1237,14 +1269,18 @@ const getPageDetails = (dom = document) => {
   };
 
   const refresh = ({ type, target }) => {
-    if (target.textContent === TARGET_TXT) return;
+    if (target.dataset.manualMatchPending) return;
     target.textContent = TARGET_TXT;
     target.title = "";
+    armManualMatchRecovery(target);
 
     if (type === "contextmenu") return matchCode(target);
     if (type !== "click") return;
-    const code = target.closest(MOVIE_SELECTOR)?.querySelector(CODE_SELECTOR)?.textContent.trim();
-    if (code) setTimeout(publish, 750, code);
+    // A normal click is an explicit single-card request.  Keep it outside the
+    // auto/recheck lanes instead of appending it to their tail via publish().
+    // matchCode owns the 45 s recovery timer and fans a completed result out to
+    // every same-code card afterwards.
+    setTimeout(() => matchCode(target), 750);
   };
 
   const forceMatch = (event) => {

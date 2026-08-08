@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.offline115
 // @namespace       JavDB.offline115@blc
-// @version         0.0.5
+// @version         0.0.6
 // @author          blc
 // @description     115 网盘离线
 // @match           https://javdb.com/*
@@ -136,8 +136,8 @@ const MATCH_API = "reMatch";
 const MATCH_DELAY = 750;
 const syncOfflineMatch = (details, res) => {
   const match = res?.status === "success" ? res.match : null;
-  if (!match || window.parent === window) return false;
-  window.parent.postMessage({
+  if (!match) return false;
+  const payload = {
     source: "JavDB.match115",
     type: "offline",
     id: crypto.randomUUID(),
@@ -148,8 +148,18 @@ const syncOfflineMatch = (details, res) => {
     realPath: match.realPath,
     hasCover: match.hasCover,
     subtitleFiles: match.subtitleFiles,
-  }, location.origin);
-  return true;
+  };
+  // Refresh the detail frame from the just-produced cache; no 115 re-match.
+  const localSources = unsafeWindow.JavDBMatchSyncOffline?.(payload);
+  if (localSources) unsafeWindow[MATCH_API]?.();
+
+  // `GM_info.script.name` differs between offline115 and match115.  Use the
+  // match script's fixed channel name, then retain postMessage as a fallback.
+  const channel = new BroadcastChannel("JavDB.match115");
+  channel.postMessage(payload);
+  channel.close();
+  if (window.parent !== window) window.parent.postMessage(payload, location.origin);
+  return Boolean(localSources) || window.parent !== window;
 };
 const WIKI_BASE_URL = "https://ja.wikipedia.org/wiki/";
 const ACTRESS_INFO_NOT_FOUND = "未找到演员信息";
@@ -413,7 +423,15 @@ const checkCrack = (magnets, uncensored) => {
 
 const offline = async ({ options, magnets, onstart, onprogress, onfinally }, currIdx = 0) => {
   onstart?.();
-  const res = await Req115.handleOffline(options, magnets.slice(currIdx));
+  let res;
+  try {
+    res = await Req115.handleOffline(options, magnets.slice(currIdx));
+  } catch (err) {
+    return onfinally?.({
+      status: "error",
+      msg: err?.message || "离线请求失败",
+    });
+  }
   if (res.status !== "warn") return onfinally?.(res);
   onprogress?.(res);
 
@@ -425,7 +443,7 @@ const offline = async ({ options, magnets, onstart, onprogress, onfinally }, cur
   const listener = GM_addValueChangeListener(STATUS_KEY, (_name, _old_value, new_value) => {
     if (![VERIFIED, FAILED].includes(new_value)) return;
     GM_removeValueChangeListener(listener);
-    if (new_value === FAILED) return onfinally?.();
+    if (new_value === FAILED) return onfinally?.({ status: "error", msg: "115 验证未通过，离线任务未提交" });
     Req115.resumeMutations();
     offline({ options, magnets, onstart, onprogress, onfinally }, res.currIdx);
   });
@@ -626,7 +644,10 @@ const offline = async ({ options, magnets, onstart, onprogress, onfinally }, cur
   const onfinally = (target, res) => {
     target.parentElement.querySelectorAll(`.${TARGET_CLASS}`).forEach((item) => item.removeAttribute("disabled"));
     target.classList.remove(LOAD_CLASS);
-    if (res) setTimeout(() => unsafeWindow[MATCH_API]?.(target), MATCH_DELAY);
+    if (!res) return;
+    Grant.notify(res);
+    Util.setFavicon(res);
+    if (res.status === "success") setTimeout(() => unsafeWindow[MATCH_API]?.(target), MATCH_DELAY);
   };
 
   const onclick = async (e) => {
