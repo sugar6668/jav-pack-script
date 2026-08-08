@@ -345,14 +345,6 @@ body:has(.x-load) #footer,
   transform: scale(1);
 }
 
-.movie-list .item:has(.x-match.is-unknown):not(.x-multi-matched) {
-  border-color: #6875c8;
-}
-
-.movie-list .item:has(.x-match.is-metadata-pending):not(.x-multi-matched) {
-  border-color: var(--x-info-bd);
-}
-
 .movie-list .item .video-title .x-match.is-unknown {
   background-color: #6875c8;
 }
@@ -570,7 +562,7 @@ html.x-actor-matched-only .movie-list .item:not(:has(.x-match:not(.is-normal))) 
     transition: border 0.2s;
 
     /* 限制旧版单色边框仅在非多色匹配下生效 */
-    &:has(.x-match:not(.is-normal)):not(.x-multi-matched) {
+    &:has(.x-match:not(.is-normal, .is-unknown, .is-metadata-pending)):not(.x-multi-matched) {
       border-style: solid;
       border-width: 0.375rem;
       border-radius: var(--x-layout-match-radius);
