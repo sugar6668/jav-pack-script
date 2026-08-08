@@ -167,7 +167,9 @@ class Drive115 extends Req {
 
 // eslint-disable-next-line no-unused-vars, unused-imports/no-unused-vars
 class Req115 extends Drive115 {
-  static MUTATION_GAP = 2000;
+  // Offline work remains strictly serial, but a completed task no longer idles
+  // the next explicit archive request for two extra seconds.
+  static MUTATION_GAP = 800;
   static MUTATION_COORDINATOR_KEY = "__JavPack115MutationCoordinatorV1";
   static REQUEST_GAP = 1000;
   static REQUEST_COORDINATOR_KEY = "__JavPack115RequestCoordinatorV1";
@@ -591,14 +593,16 @@ class Req115 extends Drive115 {
     let file_id = "";
     let videos = [];
     let allVideos = [];
+    let taskStatus;
 
     for (let index = 0; index < max; index++) {
       if (index) await sleep();
       const { tasks } = await this.lixianTaskLists();
 
       const task = tasks.find((task) => task.info_hash === info_hash);
-      if (!task || task.status === -1) break;
-
+      if (!task) break;
+      taskStatus = task.status;
+      if (taskStatus === -1) break;
       file_id = task.file_id;
       if (file_id) break;
     }
@@ -618,7 +622,8 @@ class Req115 extends Drive115 {
       const { tasks } = await this.lixianTaskLists();
       const task = tasks.find((task) => task.info_hash === info_hash);
 
-      if (task.status === 2) {
+      taskStatus = task?.status ?? taskStatus;
+      if (task?.status === 2) {
         const { data } = await this.filesAllVideos(file_id);
         allVideos = data;
         codes = codes.map((code) => code.toUpperCase());
@@ -630,7 +635,17 @@ class Req115 extends Drive115 {
       }
     }
 
-    return { videos: videos.filter(filter), allVideos, file_id };
+    const matchedVideos = videos.filter(filter);
+    return {
+      videos: matchedVideos,
+      allVideos,
+      file_id,
+      taskStatus,
+      // A task that has not reached terminal completion can legitimately have
+      // a folder but no visible media yet.  It must never be treated as a
+      // failed archive and cleaned up during this short verification window.
+      pending: !matchedVideos.length && taskStatus !== -1 && taskStatus !== 2,
+    };
   }
 
   static async handleClean(keepFiles, cid) {
@@ -713,13 +728,14 @@ class Req115 extends Drive115 {
     if (res?.host) return this.upload({ ...res, filename, file });
   }
 
-  static async handleOffline(options, magnets) {
-    return this.queueMutation("离线任务", () => this.handleOfflineNow(options, magnets));
+  static async handleOffline(options, magnets, callbacks = {}) {
+    return this.queueMutation("离线任务", () => this.handleOfflineNow(options, magnets, callbacks), callbacks);
   }
 
   static async handleOfflineNow(
     { dir, regex, codes, verifyOptions, code, rename, renameTxt, tags, clean, cover, isVR, uncensored },
     magnets,
+    { onMatch } = {},
   ) {
     const res = { status: "error", msg: `获取目录失败: ${dir.join("/")}` };
     const cid = await this.handleDir(dir);
@@ -741,21 +757,39 @@ class Req115 extends Drive115 {
         break;
       }
 
-      const { videos, allVideos = [], file_id } = await this.handleVerify(info_hash, { regex, codes }, verifyOptions);
+      const { videos, allVideos = [], file_id, pending } = await this.handleVerify(info_hash, { regex, codes }, verifyOptions);
 
       if (!videos.length) {
-        if (verifyOptions.clean) await this.lixianTaskDel([info_hash]);
-        if (file_id && clean) await this.rbDelete([file_id], cid);
-
-        res.msg = `${code} 离线验证失败`;
-        res.status = "error";
-        continue;
+        // Verification only watches a short initial window.  Do not delete a
+        // task or its folder just because 115 is still downloading, nor when
+        // a completed task uses an unexpected filename.  Only a positively
+        // verified archive enters the normal clean/rename path below.
+        res.msg = pending
+          ? `${code} 已提交，115 仍在下载，任务已保留`
+          : `${code} 未识别到匹配视频，离线任务已保留`;
+        res.status = pending ? "pend" : "error";
+        res.currIdx = index;
+        break;
       }
 
       // A verified VR torrent can contain several camera/angle files.  Keep
       // the whole task's video set in its one 115 task directory instead of
       // cleaning everything except the filename that matched the code.
       const bundleVideos = isVR && allVideos.length ? allVideos : videos;
+      // The video is available at this point.  Report it immediately so the
+      // source card can become matched while the slower rename/cover/subtitle
+      // finishing work continues in this same serialized archive operation.
+      try {
+        onMatch?.({
+          cid: file_id,
+          files: bundleVideos.map((file) => ({ ...file, cid: file_id })),
+          realPath: "",
+          hasCover: false,
+          subtitleFiles: [],
+        });
+      } catch (err) {
+        console.warn("[Req115.handleOffline.onMatch]", err?.message);
+      }
       const srtRes = await this.filesAllSRTs(file_id);
       const srts = srtRes?.data || [];
       const files = [...bundleVideos, ...srts];

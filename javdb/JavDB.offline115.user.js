@@ -141,7 +141,7 @@ const syncOfflineMatch = (details, res) => {
     source: "JavDB.match115",
     type: "offline",
     id: crypto.randomUUID(),
-    operation: "offline",
+    operation: res.operation || "offline",
     code: details.code,
     data: match.files,
     cid: match.cid,
@@ -150,7 +150,10 @@ const syncOfflineMatch = (details, res) => {
     subtitleFiles: match.subtitleFiles,
   };
   // Refresh the detail frame from the just-produced cache; no 115 re-match.
-  const localSources = unsafeWindow.JavDBMatchSyncOffline?.(payload);
+  const sync = payload.operation === "offline-pending"
+    ? unsafeWindow.JavDBMatchSyncOfflinePending
+    : unsafeWindow.JavDBMatchSyncOffline;
+  const localSources = sync?.(payload);
   if (localSources) unsafeWindow[MATCH_API]?.();
 
   // `GM_info.script.name` differs between offline115 and match115.  Use the
@@ -421,11 +424,11 @@ const checkCrack = (magnets, uncensored) => {
   return magnets.map((item) => ({ ...item, uncensored: Boolean(uncensored) }));
 };
 
-const offline = async ({ options, magnets, onstart, onprogress, onfinally }, currIdx = 0) => {
+const offline = async ({ options, magnets, onstart, onprogress, onmatch, onfinally }, currIdx = 0) => {
   onstart?.();
   let res;
   try {
-    res = await Req115.handleOffline(options, magnets.slice(currIdx));
+    res = await Req115.handleOffline(options, magnets.slice(currIdx), { onMatch: onmatch });
   } catch (err) {
     return onfinally?.({
       status: "error",
@@ -445,7 +448,7 @@ const offline = async ({ options, magnets, onstart, onprogress, onfinally }, cur
     GM_removeValueChangeListener(listener);
     if (new_value === FAILED) return onfinally?.({ status: "error", msg: "115 验证未通过，离线任务未提交" });
     Req115.resumeMutations();
-    offline({ options, magnets, onstart, onprogress, onfinally }, res.currIdx);
+    offline({ options, magnets, onstart, onprogress, onmatch, onfinally }, res.currIdx);
   });
 };
 
@@ -530,6 +533,7 @@ const offline = async ({ options, magnets, onstart, onprogress, onfinally }, cur
       magnets: checkCrack(magnets, UNC),
       onstart: () => onstart(target),
       onprogress: Util.setFavicon,
+      onmatch: (match) => syncOfflineMatch(details, { status: "success", match, operation: "offline-pending" }),
       onfinally: (res) => onfinally(target, res),
     });
   };
@@ -675,6 +679,7 @@ const offline = async ({ options, magnets, onstart, onprogress, onfinally }, cur
       offline({
         options,
         magnets: checkCrack(magnets, UNC),
+        onmatch: (match) => syncOfflineMatch(details, { status: "success", match, operation: "offline-pending" }),
         onfinally: (res) => onfinally(target, res),
       });
     } catch (err) {

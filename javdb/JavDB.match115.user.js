@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.31
+// @version         0.0.34
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -377,6 +377,13 @@ unsafeWindow.JavDBMatchSyncOffline = (payload) => {
   if (!payload?.code || !Array.isArray(payload.data)) return null;
   const sources = materializeOfflineMatch(payload);
   MatchCache.set(payload.code, sources);
+  return sources;
+};
+
+unsafeWindow.JavDBMatchSyncOfflinePending = (payload) => {
+  if (!payload?.code || !Array.isArray(payload.data)) return null;
+  const sources = materializeOfflineMatch(payload);
+  MatchCache.setMetadataPending(payload.code, sources);
   return sources;
 };
 
@@ -836,8 +843,13 @@ const getPageDetails = (dom = document) => {
       if (target.dataset.manualMatchPending !== id) return;
       const card = target.closest(MOVIE_SELECTOR);
       const details = card && matchBefore(card);
-      if (!details) return;
       delete target.dataset.manualMatchPending;
+      if (!details) {
+        target.className = `tag is-unknown ${TARGET_CLASS}`;
+        target.textContent = UNKNOWN_TXT;
+        target.title = "尚未检测 115 是否存在视频";
+        return;
+      }
       delete card.dataset.matchPending;
       const record = MatchCache.getRecord(details.code) ?? MatchCache.getRecord(details.prefix);
       if (record?.phase === "metadata") renderMetadataPending(details);
@@ -857,8 +869,9 @@ const getPageDetails = (dom = document) => {
       recheck: { total: 0, probed: 0, completed: 0, metadataPending: 0, failed: 0, status: "idle" },
     };
     let loading = false;
-    let metadataLoading = false;
-    let metadataCurrent = null;
+    const METADATA_CONCURRENCY = 2;
+    let metadataLoading = 0;
+    const metadataCurrent = new Set();
 
     const laneOf = ({ auto, recheck }) => recheck ? "recheck" : auto ? "auto" : "normal";
     const emit = (lane, status = null) => {
@@ -925,11 +938,7 @@ const getPageDetails = (dom = document) => {
     };
     const nextProbe = () => probeQueues.auto.shift() || probeQueues.recheck.shift() || probeQueues.normal.shift();
 
-    const drainMetadata = async () => {
-      if (metadataLoading || !metadataQueue.length) return;
-      metadataLoading = true;
-      const job = metadataQueue.shift();
-      metadataCurrent = job;
+    const runMetadata = async (job) => {
       const { it, scoped, shouldCache } = job;
       let failed = false;
       try {
@@ -948,10 +957,18 @@ const getPageDetails = (dom = document) => {
           Util.print(err?.message);
         }
       } finally {
-        metadataCurrent = null;
-        metadataLoading = false;
+        metadataCurrent.delete(job);
+        metadataLoading -= 1;
         settleItem(it, { failed });
         drainMetadata();
+      }
+    };
+    const drainMetadata = () => {
+      while (metadataLoading < METADATA_CONCURRENCY && metadataQueue.length) {
+        const job = metadataQueue.shift();
+        metadataLoading += 1;
+        metadataCurrent.add(job);
+        runMetadata(job);
       }
     };
     const enqueueMetadata = (it, scoped, shouldCache = true) => {
@@ -1066,7 +1083,9 @@ const getPageDetails = (dom = document) => {
         if (job.it.auto) resetCancelledAutoItem(job.it);
         else metadataQueue.push(job);
       });
-      if (metadataCurrent?.it.auto) resetCancelledAutoItem(metadataCurrent.it);
+      metadataCurrent.forEach((job) => {
+        if (job.it.auto) resetCancelledAutoItem(job.it);
+      });
       stats.auto = { total: 0, probed: 0, completed: 0, metadataPending: 0, failed: 0, status: "cancelled" };
       emit("auto");
     };
@@ -1195,12 +1214,16 @@ const getPageDetails = (dom = document) => {
     const isSnapshot = (payload.type === "sync" || payload.type === "offline") && Array.isArray(payload.data);
     if (isSnapshot) {
       const sources = payload.type === "offline" ? materializeOfflineMatch(payload) : payload.data;
-      MatchCache.set(payload.code, sources);
+      const metadataPending = payload.operation === "offline-pending";
+      if (metadataPending) MatchCache.setMetadataPending(payload.code, sources);
+      else MatchCache.set(payload.code, sources);
       // A new/untested card has no match-result CSS class yet.  Render the
       // exact snapshot by its stable card code so QuickView close is immediate.
       findCardsByCode(payload.code).forEach((node) => {
         const details = matchBefore(node);
-        if (details) matchAfter(details, sources);
+        if (!details) return;
+        if (metadataPending) renderMetadataPending(details);
+        else matchAfter(details, sources);
       });
       // The parent receives an exact post-mutation snapshot before the Quick
       // View frame disappears, so it can repaint without querying 115 again.
@@ -1251,10 +1274,12 @@ const getPageDetails = (dom = document) => {
     armManualMatchRecovery(target);
 
     try {
-      const { data = [] } = await withMatchTimeout(Req115.filesSearchAllVideos(codes.join(" "), { skipMatchQueue: true }));
+      const sources = await withMatchTimeout((async () => {
+        const { data = [] } = await Req115.filesSearchAllVideos(codes.join(" "), { skipMatchQueue: true });
+        return enrichMetadata(extractData(data.filter((it) => regex.test(it.n))), details);
+      })(), "115 匹配或元数据补全超时");
       if (target.dataset.uid !== UUID) return;
 
-      const sources = await enrichMetadata(extractData(data.filter((it) => regex.test(it.n))), details);
       MatchCache.set(code, sources);
       matchAfter(details, sources);
     } catch (err) {
