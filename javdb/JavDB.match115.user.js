@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.27
+// @version         0.0.28
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -686,6 +686,16 @@ const getPageDetails = (dom = document) => {
   if (!movieList.length) return;
 
   const parseCodeCls = (code) => ["x", ...code.split(/[\s.\-_]/)].filter(Boolean).join("-");
+  const normalizeMatchCode = (code) => String(code || "").trim().toUpperCase();
+  const findCardsByCode = (code) => {
+    const normalized = normalizeMatchCode(code);
+    if (!normalized) return [];
+    return [...document.querySelectorAll(MOVIE_SELECTOR)].filter((card) => {
+      const stored = normalizeMatchCode(card.dataset.matchCode);
+      const current = normalizeMatchCode(card.querySelector(CODE_SELECTOR)?.textContent);
+      return stored === normalized || current === normalized;
+    });
+  };
   const getMatchType = ({ n }) => {
     const crack = Magnet.crackReg.test(n);
     const subtitle = Magnet.zhReg.test(n);
@@ -798,6 +808,7 @@ const getPageDetails = (dom = document) => {
     const code = target.querySelector(CODE_SELECTORS[1])?.textContent.trim();
     if (!code) return;
 
+    node.dataset.matchCode = normalizeMatchCode(code);
     if (!target.querySelector(`.${TARGET_CLASS}`)) target.insertAdjacentHTML("afterbegin", TARGET_HTML);
 
     const parsed = Util.codeParse(code);
@@ -1150,14 +1161,22 @@ const getPageDetails = (dom = document) => {
       handledSyncs.add(payload.id);
       setTimeout(() => handledSyncs.delete(payload.id), 30 * 1000);
     }
-    if ((payload.type === "sync" || payload.type === "offline") && Array.isArray(payload.data)) {
+    const isSnapshot = (payload.type === "sync" || payload.type === "offline") && Array.isArray(payload.data);
+    if (isSnapshot) {
       const sources = payload.type === "offline" ? materializeOfflineMatch(payload) : payload.data;
       MatchCache.set(payload.code, sources);
+      // A new/untested card has no match-result CSS class yet.  Render the
+      // exact snapshot by its stable card code so QuickView close is immediate.
+      findCardsByCode(payload.code).forEach((node) => {
+        const details = matchBefore(node);
+        if (details) matchAfter(details, sources);
+      });
       // The parent receives an exact post-mutation snapshot before the Quick
       // View frame disappears, so it can repaint without querying 115 again.
       window.dispatchEvent(new CustomEvent("JavDB_MatchCacheSynced", { detail: { code: payload.code, operation: payload.operation } }));
+      return;
     }
-    matchQueue(document.querySelectorAll(`.${parseCodeCls(payload.code)}`), { force: true, cacheOnly: payload.type === "sync" || payload.type === "offline" });
+    matchQueue(findCardsByCode(payload.code), { force: true, cacheOnly: false, immediate: true });
   };
   CHANNEL.onmessage = ({ data }) => receiveMatchState(data);
   window.addEventListener("message", ({ data, origin }) => {
@@ -1165,7 +1184,7 @@ const getPageDetails = (dom = document) => {
   });
 
   const publish = (code) => {
-    const nodes = document.querySelectorAll(`.${parseCodeCls(code)}`);
+    const nodes = findCardsByCode(code);
     let hasLocalResult = false;
     nodes.forEach((node) => {
       const details = matchBefore(node);
