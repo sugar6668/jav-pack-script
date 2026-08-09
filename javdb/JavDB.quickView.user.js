@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.quickView
 // @namespace       JavDB.quickView@blc
-// @version         0.0.3
+// @version         0.0.4
 // @author          blc
 // @description     JavDB 瀑布流小窗预览
 // @match           https://javdb.com/*
@@ -16,9 +16,7 @@
   if (!window.JavPackQuickView) return;
 
   const quickView = new window.JavPackQuickView();
-  const syncedMutations = new Map();
   const ensure = () => quickView.ensureButtons(document);
-  const getCode = (card) => card?.querySelector(".video-title strong")?.textContent.trim().toUpperCase();
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", ensure, { once: true });
@@ -36,24 +34,7 @@
       });
     });
   }).observe(document.body, { childList: true, subtree: true });
-  window.addEventListener("JavDB_MatchCacheSynced", ({ detail }) => {
-    const code = String(detail?.code || "").trim().toUpperCase();
-    if (code) syncedMutations.set(code, { at: Date.now(), operation: detail?.operation || "sync" });
-  });
-  window.addEventListener("JavDB_QuickView_Closed", ({ detail }) => {
-    const card = detail?.card;
-    const matchNode = card?.querySelector(".x-match");
-    if (!matchNode) return;
-
-    const code = getCode(card);
-    const synced = syncedMutations.get(code);
-    // Archive, rename, cover, and delete now send an exact MatchCache snapshot
-    // before this iframe is removed.  Reuse it instead of immediately querying
-    // 115 again; if no sync arrives, retain the ordinary close -> reMatch path.
-    if (synced && Date.now() - synced.at < 10 * 1000) {
-      syncedMutations.delete(code);
-      return;
-    }
-    setTimeout(() => unsafeWindow.reMatch?.(matchNode), 400);
-  });
+  // Closing QuickView is intentionally passive. Match/offline/archive actions
+  // publish exact cache snapshots themselves; a view-only close (including a
+  // subtitle search with no upload) must not reset and re-query the source card.
 })();

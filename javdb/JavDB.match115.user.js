@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.36
+// @version         0.0.41
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -240,17 +240,24 @@ const MatchCache = (() => {
     GM_deleteValue(fullKey(cacheKey));
   };
 
-  const getRecord = (key) => {
+  const getRecord = (key, { fresh = false } = {}) => {
     const cacheKey = normalize(key);
     if (!cacheKey) return null;
 
-    let value = mem.get(cacheKey);
+    // A QuickView iframe and its source page share GM storage but not this
+    // in-memory map.  A code-only cross-frame notification must therefore be
+    // able to bypass an older local `metadata` record and read the final value.
+    let value = fresh ? GM_getValue(fullKey(cacheKey)) : mem.get(cacheKey);
     if (!value) {
       value = GM_getValue(fullKey(cacheKey));
       if (valid(value)) mem.set(cacheKey, value);
     }
 
-    if (!valid(value)) return null;
+    if (!valid(value)) {
+      if (fresh) mem.delete(cacheKey);
+      return null;
+    }
+    if (fresh) mem.set(cacheKey, value);
     return value;
   };
 
@@ -276,7 +283,7 @@ const MatchCache = (() => {
 
   migrate();
   markLegacyUnmatchedForRecheck();
-  return { get, getRecord, set, setMetadataPending, del };
+  return { get, getRecord, getFreshRecord: (key) => getRecord(key, { fresh: true }), set, setMetadataPending, del };
 })();
 
 
@@ -529,12 +536,17 @@ const getPageDetails = (dom = document) => {
     try {
       // Context-menu matching is an explicit one-card action.  It must not
       // wait behind the waterfall/recheck search coordinator.
-      const { data = [] } = await withMatchTimeout(Req115.filesSearchAllVideos(codes.join(" "), { skipMatchQueue: true }));
+      const sources = await withMatchTimeout((async () => {
+        const { data = [] } = await Req115.filesSearchAllVideos(codes.join(" "), { skipMatchQueue: true });
+        return enrichMetadata(extractData(data.filter((it) => regex.test(it.n))), { code, codes, regex });
+      })(), "115 \u5339\u914d\u6216\u5143\u6570\u636e\u8865\u5168\u8d85\u65f6");
       if (load.dataset.uid !== UUID) return;
 
-      const sources = await enrichMetadata(extractData(data.filter((it) => regex.test(it.n))), { code, codes, regex });
       cont.innerHTML = renderMatches(sources);
       MatchCache.set(code, sources);
+      // This is the detail/QuickView matcher, not the card matcher below.
+      // Send both positive and empty completed results to the source card now.
+      syncQuickViewState("match", sources);
     } catch (err) {
       if (load.dataset.uid !== UUID) return;
       cont.innerHTML = "匹配失败";
@@ -747,7 +759,8 @@ const getPageDetails = (dom = document) => {
       .join(", ")})`;
   };
 
-  const matchAfter = ({ code, regex, target }, data) => {
+  const matchAfter = ({ code, regex, target, manual = false }, data) => {
+    if (target.dataset.manualMatchPending && !manual) return;
     const itemNode = target.closest(MOVIE_SELECTOR);
     delete itemNode.dataset.matchPending;
     delete target.dataset.manualMatchPending;
@@ -815,6 +828,10 @@ const getPageDetails = (dom = document) => {
   };
 
   const renderUnknown = (details) => {
+    if (details.target?.dataset.manualMatchPending && !details.manual) return;
+    const card = details.target?.closest(MOVIE_SELECTOR);
+    delete card?.dataset.matchPending;
+    delete card?.dataset.matchResolved;
     delete details.target?.dataset.manualMatchPending;
     setMatchTag(details, UNKNOWN_TXT, "is-unknown", "\u5c1a\u672a\u68c0\u6d4b 115 \u662f\u5426\u5b58\u5728\u89c6\u9891");
     const button = details.target?.querySelector(`.${FORCE_MATCH_CLASS}`);
@@ -822,10 +839,13 @@ const getPageDetails = (dom = document) => {
     if (button) button.disabled = false;
   };
   const renderMetadataPending = (details) => {
+    if (details.target?.dataset.manualMatchPending && !details.manual) return;
     setMatchTag(details, METADATA_TXT, "is-metadata-pending", "\u5df2\u53d1\u73b0\u89c6\u9891\uff0c\u6b63\u5728\u8865\u5168\u76ee\u5f55\u3001\u5c01\u9762\u548c\u5b57\u5e55\u4fe1\u606f");
     const button = details.target?.querySelector(`.${FORCE_MATCH_CLASS}`);
-    button?.classList.remove("is-loading");
-    if (button) button.disabled = false;
+    if (!details.manual) {
+      button?.classList.remove("is-loading");
+      if (button) button.disabled = false;
+    }
   };
 
   const matchBefore = (node) => {
@@ -844,29 +864,6 @@ const getPageDetails = (dom = document) => {
     target.dataset.isVr = isVrTitle(target.textContent) ? "1" : "";
     return { ...parsed, searchKey: parsed.codes.join(" "), target };
   };
-  const armManualMatchRecovery = (target) => {
-    const id = crypto.randomUUID();
-    target.dataset.manualMatchPending = id;
-    setTimeout(() => {
-      if (target.dataset.manualMatchPending !== id) return;
-      const card = target.closest(MOVIE_SELECTOR);
-      const details = card && matchBefore(card);
-      delete target.dataset.manualMatchPending;
-      if (!details) {
-        target.className = `tag is-unknown ${TARGET_CLASS}`;
-        target.textContent = UNKNOWN_TXT;
-        target.title = "尚未检测 115 是否存在视频";
-        return;
-      }
-      delete card.dataset.matchPending;
-      const record = MatchCache.getRecord(details.code) ?? MatchCache.getRecord(details.prefix);
-      if (record?.phase === "metadata") renderMetadataPending(details);
-      else if (record?.data) matchAfter(details, record.data);
-      else renderUnknown(details);
-      Util.print("115 匹配请求超时，已恢复为可重试状态");
-    }, MATCH_REQUEST_TIMEOUT);
-  };
-
   const useMatchQueue = (before, after) => {
     const wait = {};
     const probeQueues = { auto: [], recheck: [], normal: [] };
@@ -950,7 +947,10 @@ const getPageDetails = (dom = document) => {
       const { it, scoped, shouldCache } = job;
       let failed = false;
       try {
-        const enriched = await enrichMetadata(scoped, it);
+        const enriched = await withMatchTimeout(
+          enrichMetadata(scoped, it),
+          "115 \u5143\u6570\u636e\u8865\u5168\u8d85\u65f6",
+        );
         if (!it.cancelled) {
           if (shouldCache) MatchCache.set(it.code, enriched);
           after?.(it, enriched);
@@ -961,7 +961,15 @@ const getPageDetails = (dom = document) => {
         // without incorrectly replacing it with an empty match result.
         if (!it.cancelled) {
           delete it.target.closest(MOVIE_SELECTOR)?.dataset.matchPending;
-          renderMetadataPending(it);
+          if (it.force) {
+            // Explicit right-click/rematch actions must always leave the card
+            // in a completed state. The known video result is still usable
+            // when directory/cover/subtitle enrichment times out.
+            if (shouldCache) MatchCache.set(it.code, scoped);
+            after?.(it, scoped);
+          } else {
+            renderMetadataPending(it);
+          }
           Util.print(err?.message);
         }
       } finally {
@@ -1030,7 +1038,7 @@ const getPageDetails = (dom = document) => {
           if (!it.cancelled) {
             const record = MatchCache.getRecord(it.code) ?? MatchCache.getRecord(it.prefix);
             if (record?.phase === "metadata") renderMetadataPending(it);
-            else if (record?.status === "unmatched") after?.(it, []);
+            else if (record?.data) after?.(it, record.data);
             else renderUnknown(it);
           }
           settleItem(it, { failed: true });
@@ -1044,16 +1052,21 @@ const getPageDetails = (dom = document) => {
       if (auto && !isAutoMatchEnabled()) return;
       const details = before?.(node);
       if (!details) return;
+      if (details.target.dataset.manualMatchPending) return;
       const { code, prefix, searchKey } = details;
       const record = MatchCache.getRecord(code) ?? MatchCache.getRecord(prefix);
       const recheckLegacyEmpty = auto && record?.needsRecheck === true;
       const refreshStoredResult = force || recheck || recheckLegacyEmpty;
       if (cacheOnly && record?.data) return after?.(details, record.data);
-      if (node.dataset.matchPending === "1" || (node.dataset.matchResolved === "1" && !refreshStoredResult)) return;
+      // `force` is the explicit recovery path used by right-click refresh and
+      // the adjacent rematch button.  It must be allowed to replace a stale
+      // pending flag; otherwise the later reset below is unreachable and the
+      // card stays on "匹配中" forever.
+      if ((!force && node.dataset.matchPending === "1") || (node.dataset.matchResolved === "1" && !refreshStoredResult)) return;
       if (record?.phase === "metadata" && !refreshStoredResult) {
         renderMetadataPending(details);
         if (!auto) return;
-        const it = { ...details, auto, recheck, onSettled, lane: laneOf({ auto, recheck }), settled: false, cancelled: false };
+        const it = { ...details, force, auto, recheck, onSettled, lane: laneOf({ auto, recheck }), settled: false, cancelled: false };
         node.dataset.matchPending = "1";
         trackQueued(it);
         enqueueMetadata(it, record.data.filter((file) => it.regex.test(file.n)), true);
@@ -1064,7 +1077,7 @@ const getPageDetails = (dom = document) => {
         delete node.dataset.matchPending;
         delete node.dataset.matchResolved;
       }
-      const it = { ...details, auto, recheck, onSettled, lane: laneOf({ auto, recheck }), settled: false, cancelled: false };
+      const it = { ...details, force, auto, recheck, onSettled, lane: laneOf({ auto, recheck }), settled: false, cancelled: false };
       node.dataset.matchPending = "1";
       setMatchTag(it, TARGET_TXT, "is-normal");
       trackQueued(it);
@@ -1122,6 +1135,19 @@ const getPageDetails = (dom = document) => {
     if (!record) return renderUnknown(details);
     if (record.phase === "metadata") return renderMetadataPending(details);
     matchAfter(details, record.data);
+  };
+  const hydrateSyncedCards = (code) => {
+    let foundState = false;
+    findCardsByCode(code).forEach((node) => {
+      const details = matchBefore(node);
+      if (!details) return;
+      const record = MatchCache.getFreshRecord(details.code) ?? MatchCache.getFreshRecord(details.prefix);
+      if (!record) return;
+      foundState = true;
+      if (record.phase === "metadata") renderMetadataPending(details);
+      else matchAfter(details, record.data);
+    });
+    return foundState;
   };
   const finishRecheckWhenExhausted = () => {
     if (!recheckSession?.active) return;
@@ -1238,6 +1264,15 @@ const getPageDetails = (dom = document) => {
       window.dispatchEvent(new CustomEvent("JavDB_MatchCacheSynced", { detail: { code: payload.code, operation: payload.operation } }));
       return;
     }
+    // Older detail frames and the beforeunload fallback only announce the
+    // code.  Read GM storage afresh first: the iframe may already have written
+    // a completed matched *or unmatched* record while this page still holds a
+    // stale in-memory "补全中" entry.  Re-entering the queue in that state is
+    // de-duplicated, which is what previously left the card stuck forever.
+    if (hydrateSyncedCards(payload.code)) {
+      window.dispatchEvent(new CustomEvent("JavDB_MatchCacheSynced", { detail: { code: payload.code, operation: payload.operation || "cache" } }));
+      return;
+    }
     matchQueue(findCardsByCode(payload.code), { force: true, cacheOnly: false, immediate: true });
   };
   CHANNEL.onmessage = ({ data }) => receiveMatchState(data);
@@ -1245,44 +1280,7 @@ const getPageDetails = (dom = document) => {
     if (origin === location.origin && data?.source === "JavDB.match115") receiveMatchState(data);
   });
 
-  const publish = (code) => {
-    const nodes = findCardsByCode(code);
-    let hasLocalResult = false;
-    let localData = null;
-    nodes.forEach((node) => {
-      const details = matchBefore(node);
-      const cache = details && (MatchCache.get(details.code) ?? MatchCache.get(details.prefix));
-      if (details && cache?.data) {
-        hasLocalResult = true;
-        localData ??= cache.data;
-        matchAfter(details, cache.data);
-      }
-    });
-    // A detail-page right-click refresh can follow an offline-pending snapshot.
-    // Publishing only the code makes the parent re-enter its queue, where the
-    // pending card is deliberately de-duplicated and remains "补全中". Send the
-    // completed snapshot instead so the parent immediately runs matchAfter(),
-    // clearing pending state and repainting the card's colour/border.
-    if (hasLocalResult) {
-      const payload = {
-        source: "JavDB.match115",
-        type: "sync",
-        id: crypto.randomUUID(),
-        operation: "match",
-        code,
-        data: localData,
-      };
-      CHANNEL.postMessage(payload);
-      if (window.parent !== window) window.parent.postMessage(payload, location.origin);
-      return;
-    }
-
-    // A card with no local result still needs the original forced request.
-    matchQueue(nodes, { force: true, immediate: true });
-    CHANNEL.postMessage(code);
-  };
-
-  const matchCode = async (node) => {
+  const queueManualMatch = async (node, { clearCache = false } = {}) => {
     const movie = node.closest(MOVIE_SELECTOR);
     if (!movie) return;
 
@@ -1290,49 +1288,71 @@ const getPageDetails = (dom = document) => {
     const target = movie.querySelector(`.${TARGET_CLASS}`);
     if (!code || !target) return;
 
-    const details = {
-      ...Util.codeParse(code),
-      isVR: isVrTitle(movie.querySelector(".video-title")?.textContent),
-      target,
-    };
-    const { codes, regex } = details;
-    const UUID = crypto.randomUUID();
-    target.dataset.uid = UUID;
-    armManualMatchRecovery(target);
+    const parsed = matchBefore(movie);
+    if (!parsed) return;
+    const details = { ...parsed, manual: true };
+    const fallback = clearCache
+      ? null
+      : MatchCache.getRecord(details.code) ?? MatchCache.getRecord(details.prefix);
+    if (clearCache) MatchCache.del(code);
+    const requestId = crypto.randomUUID();
+    target.dataset.uid = requestId;
+    target.dataset.manualMatchPending = requestId;
+    delete movie.dataset.matchPending;
+    delete movie.dataset.matchResolved;
+    setMatchTag(details, TARGET_TXT, "is-normal");
 
     try {
-      const sources = await withMatchTimeout((async () => {
-        const { data = [] } = await Req115.filesSearchAllVideos(codes.join(" "), { skipMatchQueue: true });
-        return enrichMetadata(extractData(data.filter((it) => regex.test(it.n))), details);
-      })(), "115 匹配或元数据补全超时");
-      if (target.dataset.uid !== UUID) return;
+      // Manual right-click/rematch is an independent one-card lane. It skips
+      // both the page probe queue and Req115's global match-search slot, so it
+      // can run beside automatic matching or unmatched recheck.
+      const { data = [] } = await withMatchTimeout(
+        Req115.filesSearchAllVideos(details.codes.join(" "), { skipMatchQueue: true }),
+        "115 手动强制匹配请求超时",
+      );
+      if (target.dataset.uid !== requestId) return;
 
+      const scoped = extractData(data.filter((item) => details.regex.test(item.n)));
+      if (!scoped.length) {
+        MatchCache.set(code, []);
+        matchAfter(details, []);
+        return;
+      }
+
+      MatchCache.setMetadataPending(code, scoped);
+      renderMetadataPending(details);
+      let sources = scoped;
+      try {
+        sources = await withMatchTimeout(
+          enrichMetadata(scoped, details),
+          "115 手动强制匹配元数据补全超时",
+        );
+      } catch (err) {
+        // The video hit is authoritative; metadata timeout must not leave the
+        // card in a permanent pending state.
+        Util.print(err?.message);
+      }
+      if (target.dataset.uid !== requestId) return;
       MatchCache.set(code, sources);
       matchAfter(details, sources);
     } catch (err) {
-      if (target.dataset.uid !== UUID) return;
-      const cached = MatchCache.get(code) ?? MatchCache.get(details.prefix);
-      if (cached) matchAfter(details, cached);
+      if (target.dataset.uid !== requestId) return;
+      if (fallback?.data) matchAfter(details, fallback.data);
       else renderUnknown(details);
       Util.print(err?.message);
+    } finally {
+      if (target.dataset.uid === requestId) {
+        delete target.dataset.uid;
+        delete target.dataset.manualMatchPending;
+        delete movie.dataset.matchPending;
+      }
     }
-
-    publish(code);
   };
 
   const refresh = ({ type, target }) => {
-    if (target.dataset.manualMatchPending) return;
-    target.textContent = TARGET_TXT;
-    target.title = "";
-    armManualMatchRecovery(target);
-
-    if (type === "contextmenu") return matchCode(target);
+    if (type === "contextmenu") return queueManualMatch(target);
     if (type !== "click") return;
-    // A normal click is an explicit single-card request.  Keep it outside the
-    // auto/recheck lanes instead of appending it to their tail via publish().
-    // matchCode owns the 45 s recovery timer and fans a completed result out to
-    // every same-code card afterwards.
-    setTimeout(() => matchCode(target), 750);
+    setTimeout(() => queueManualMatch(target), 750);
   };
 
   const forceMatch = (event) => {
@@ -1352,19 +1372,12 @@ const getPageDetails = (dom = document) => {
 
     button.disabled = true;
     button.classList.add("is-loading");
-    // Delete only this card's stored state, then use the direct manual channel.
-    MatchCache.del(code);
-    target.className = `tag is-normal ${TARGET_CLASS}`;
-    target.dataset.pc = "";
-    target.dataset.cid = "";
-    target.textContent = TARGET_TXT;
-    target.title = "";
-    matchCode(target);
+    queueManualMatch(target, { clearCache: true });
   };
 
-  unsafeWindow[MATCH_API] = matchCode;
+  unsafeWindow[MATCH_API] = queueManualMatch;
   document.addEventListener("click", forceMatch, true);
-  listenClick(matchCode, refresh);
+  listenClick(queueManualMatch, refresh);
 })();
 
 observeAutoMatchToggle();
