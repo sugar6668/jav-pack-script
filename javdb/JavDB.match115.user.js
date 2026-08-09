@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.34
+// @version         0.0.36
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -817,8 +817,16 @@ const getPageDetails = (dom = document) => {
   const renderUnknown = (details) => {
     delete details.target?.dataset.manualMatchPending;
     setMatchTag(details, UNKNOWN_TXT, "is-unknown", "\u5c1a\u672a\u68c0\u6d4b 115 \u662f\u5426\u5b58\u5728\u89c6\u9891");
+    const button = details.target?.querySelector(`.${FORCE_MATCH_CLASS}`);
+    button?.classList.remove("is-loading");
+    if (button) button.disabled = false;
   };
-  const renderMetadataPending = (details) => setMatchTag(details, METADATA_TXT, "is-metadata-pending", "\u5df2\u53d1\u73b0\u89c6\u9891\uff0c\u6b63\u5728\u8865\u5168\u76ee\u5f55\u3001\u5c01\u9762\u548c\u5b57\u5e55\u4fe1\u606f");
+  const renderMetadataPending = (details) => {
+    setMatchTag(details, METADATA_TXT, "is-metadata-pending", "\u5df2\u53d1\u73b0\u89c6\u9891\uff0c\u6b63\u5728\u8865\u5168\u76ee\u5f55\u3001\u5c01\u9762\u548c\u5b57\u5e55\u4fe1\u606f");
+    const button = details.target?.querySelector(`.${FORCE_MATCH_CLASS}`);
+    button?.classList.remove("is-loading");
+    if (button) button.disabled = false;
+  };
 
   const matchBefore = (node) => {
     if (node.classList.contains("is-hidden")) return;
@@ -1240,18 +1248,37 @@ const getPageDetails = (dom = document) => {
   const publish = (code) => {
     const nodes = findCardsByCode(code);
     let hasLocalResult = false;
+    let localData = null;
     nodes.forEach((node) => {
       const details = matchBefore(node);
       const cache = details && (MatchCache.get(details.code) ?? MatchCache.get(details.prefix));
       if (details && cache?.data) {
         hasLocalResult = true;
+        localData ??= cache.data;
         matchAfter(details, cache.data);
       }
     });
-    // Left-click keeps its original cache-refresh fallback for cards that have
-    // never been searched. A completed manual search has local data and does
-    // not enter the normal waterfall queue a second time.
-    if (!hasLocalResult) matchQueue(nodes, { force: true, immediate: true });
+    // A detail-page right-click refresh can follow an offline-pending snapshot.
+    // Publishing only the code makes the parent re-enter its queue, where the
+    // pending card is deliberately de-duplicated and remains "补全中". Send the
+    // completed snapshot instead so the parent immediately runs matchAfter(),
+    // clearing pending state and repainting the card's colour/border.
+    if (hasLocalResult) {
+      const payload = {
+        source: "JavDB.match115",
+        type: "sync",
+        id: crypto.randomUUID(),
+        operation: "match",
+        code,
+        data: localData,
+      };
+      CHANNEL.postMessage(payload);
+      if (window.parent !== window) window.parent.postMessage(payload, location.origin);
+      return;
+    }
+
+    // A card with no local result still needs the original forced request.
+    matchQueue(nodes, { force: true, immediate: true });
     CHANNEL.postMessage(code);
   };
 
