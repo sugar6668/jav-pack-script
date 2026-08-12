@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.41
+// @version         0.0.42
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -700,6 +700,23 @@ const getPageDetails = (dom = document) => {
   const CODE_SELECTORS = [".video-title", "strong"];
   const CODE_SELECTOR = CODE_SELECTORS.join(" ");
   const FORCE_MATCH_CLASS = "x-match-force";
+  // Filtered cards can still be present in the DOM. They are not part of
+  // the current page from the matching queue's point of view. This checks
+  // CSS/layout visibility rather than viewport intersection, so cards below
+  // the fold remain eligible when they are actually displayed.
+  const isDisplayedMovieCard = (node) => {
+    if (!(node instanceof Element)) return false;
+    const card = node.matches(MOVIE_SELECTOR) ? node : node.closest(MOVIE_SELECTOR);
+    if (!card?.isConnected) return false;
+    if (card.hidden || card.classList.contains("x-purify-keyword-hidden") || card.dataset.purifyKeywordHidden === "1") return false;
+    for (let current = card; current; current = current.parentElement) {
+      if (current.hidden) return false;
+      const style = window.getComputedStyle(current);
+      if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return false;
+    }
+    return true;
+  };
+  const getDisplayedMovieCards = () => [...document.querySelectorAll(MOVIE_SELECTOR)].filter(isDisplayedMovieCard);
   const TARGET_HTML = `<a href="${VOID}" class="tag is-unknown ${TARGET_CLASS}">${UNKNOWN_TXT}</a><button type="button" class="tag is-light ${FORCE_MATCH_CLASS} is-hidden" title="强制重新匹配 115" aria-label="强制重新匹配 115">↻</button>`;
   const SUBTITLE_ICON_HTML = `<span class="tag x-match-subtitle" title="网盘目录内已有字幕" aria-label="网盘目录内已有字幕"><svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M2 12C2 8.22876 2 6.34315 3.17157 5.17157C4.34315 4 6.22876 4 10 4H14C17.7712 4 19.6569 4 20.8284 5.17157C22 6.34315 22 8.22876 22 12C22 15.7712 22 17.6569 20.8284 18.8284C19.6569 20 17.7712 20 14 20H10C6.22876 20 4.34315 20 3.17157 18.8284C2 17.6569 2 15.7712 2 12ZM6 15.25C5.58579 15.25 5.25 15.5858 5.25 16C5.25 16.4142 5.58579 16.75 6 16.75H10C10.4142 16.75 10.75 16.4142 10.75 16C10.75 15.5858 10.4142 15.25 10 15.25H6ZM7.75 13C7.75 12.5858 7.41421 12.25 7 12.25H6C5.58579 12.25 5.25 12.5858 5.25 13C5.25 13.4142 5.58579 13.75 6 13.75H7C7.41421 13.75 7.75 13.4142 7.75 13ZM11.5 12.25C11.9142 12.25 12.25 12.5858 12.25 13C12.25 13.4142 11.9142 13.75 11.5 13.75H9.5C9.08579 13.75 8.75 13.4142 8.75 13C8.75 12.5858 9.08579 12.25 9.5 12.25H11.5ZM18.75 13C18.75 12.5858 18.4142 12.25 18 12.25H14C13.5858 12.25 13.25 12.5858 13.25 13C13.25 13.4142 13.5858 13.75 14 13.75H18C18.4142 13.75 18.75 13.4142 18.75 13ZM12.5 15.25C12.0858 15.25 11.75 15.5858 11.75 16C11.75 16.4142 12.0858 16.75 12.5 16.75H14C14.4142 16.75 14.75 16.4142 14.75 16C14.75 15.5858 14.4142 15.25 14 15.25H12.5ZM15.75 16C15.75 15.5858 16.0858 15.25 16.5 15.25H18C18.4142 15.25 18.75 15.5858 18.75 16C18.75 16.4142 18.4142 16.75 18 16.75H16.5C16.0858 16.75 15.75 16.4142 15.75 16Z" fill="currentColor"></path></svg></span>`;
   const MATCH_TYPE_COLORS = {
@@ -922,8 +939,14 @@ const getPageDetails = (dom = document) => {
       it.cancelled = true;
       const card = it.target.closest(MOVIE_SELECTOR);
       delete card?.dataset.matchPending;
+      if (it.recheck) delete card?.dataset.recheckSession;
       if (it.recheck || it.auto) renderUnknown(it);
       settleItem(it);
+    };
+    const cancelHiddenAutoItem = (it) => {
+      if (!it.auto || isDisplayedMovieCard(it.target)) return false;
+      resetCancelledAutoItem(it);
+      return true;
     };
     const enqueueProbe = (searchKey, lane) => {
       const existing = queuedKeys.get(searchKey);
@@ -947,6 +970,7 @@ const getPageDetails = (dom = document) => {
       const { it, scoped, shouldCache } = job;
       let failed = false;
       try {
+        if (cancelHiddenAutoItem(it)) return;
         const enriched = await withMatchTimeout(
           enrichMetadata(scoped, it),
           "115 \u5143\u6570\u636e\u8865\u5168\u8d85\u65f6",
@@ -982,12 +1006,14 @@ const getPageDetails = (dom = document) => {
     const drainMetadata = () => {
       while (metadataLoading < METADATA_CONCURRENCY && metadataQueue.length) {
         const job = metadataQueue.shift();
+        if (cancelHiddenAutoItem(job.it)) continue;
         metadataLoading += 1;
         metadataCurrent.add(job);
         runMetadata(job);
       }
     };
     const enqueueMetadata = (it, scoped, shouldCache = true) => {
+      if (cancelHiddenAutoItem(it)) return;
       trackMetadata(it);
       metadataQueue.push({ it, scoped, shouldCache });
       drainMetadata();
@@ -998,6 +1024,7 @@ const getPageDetails = (dom = document) => {
       pending.forEach((it) => {
         const scoped = data.filter((file) => it.regex.test(file.n));
         trackProbe(it);
+        if (cancelHiddenAutoItem(it)) return;
         if (!scoped.length) {
           if (!it.cancelled) {
             MatchCache.set(it.code, []);
@@ -1021,11 +1048,18 @@ const getPageDetails = (dom = document) => {
       if (!job) return;
       const { searchKey } = job;
       queuedKeys.delete(searchKey);
-      if (!wait[searchKey]?.length) return match();
+      const activePending = (wait[searchKey] || []).filter((it) => !cancelHiddenAutoItem(it));
+      if (!activePending.length) {
+        delete wait[searchKey];
+        return match();
+      }
+      wait[searchKey] = activePending;
       loading = true;
       try {
         const { data = [] } = await withMatchTimeout(Req115.filesSearchAllVideos(searchKey));
-        const pendingItems = wait[searchKey] || [];
+        const pendingItems = (wait[searchKey] || []).filter((it) => !cancelHiddenAutoItem(it));
+        if (pendingItems.length) wait[searchKey] = pendingItems;
+        else delete wait[searchKey];
         const matchedData = data.filter((item) => pendingItems.some(({ regex }) => regex.test(item.n)));
         resolveSearch(searchKey, extractData(matchedData));
       } catch (err) {
@@ -1035,6 +1069,7 @@ const getPageDetails = (dom = document) => {
         delete wait[searchKey];
         pending.forEach((it) => {
           trackProbe(it);
+          if (cancelHiddenAutoItem(it)) return;
           if (!it.cancelled) {
             const record = MatchCache.getRecord(it.code) ?? MatchCache.getRecord(it.prefix);
             if (record?.phase === "metadata") renderMetadataPending(it);
@@ -1050,6 +1085,7 @@ const getPageDetails = (dom = document) => {
     };
     const dispatch = (node, { force = false, cacheOnly = false, auto = false, recheck = false, onSettled = null } = {}) => {
       if (auto && !isAutoMatchEnabled()) return;
+      if (auto && !isDisplayedMovieCard(node)) return;
       const details = before?.(node);
       if (!details) return;
       if (details.target.dataset.manualMatchPending) return;
@@ -1111,6 +1147,7 @@ const getPageDetails = (dom = document) => {
       emit("auto");
     };
     const enqueue = (nodeList, options = {}) => [...nodeList].forEach((node) => {
+      if (options.auto && !isDisplayedMovieCard(node)) return;
       const { force = false, immediate = false } = options;
       if (force || immediate || document.documentElement.classList.contains("x-actor-matched-only")) {
         requestAnimationFrame(() => dispatch(node, options));
@@ -1166,7 +1203,7 @@ const getPageDetails = (dom = document) => {
   const collectRecheckCards = (nodes) => {
     if (!recheckSession?.active || !isAutoMatchEnabled()) return;
     const cards = [...nodes].filter((node) => {
-      if (!node.matches?.(MOVIE_SELECTOR) || node.dataset.recheckSession === recheckSession.id) return false;
+      if (!isDisplayedMovieCard(node) || !node.matches?.(MOVIE_SELECTOR) || node.dataset.recheckSession === recheckSession.id) return false;
       const details = matchBefore(node);
       if (!details || node.dataset.matchPending === "1") return false;
       const record = MatchCache.getRecord(details.code) ?? MatchCache.getRecord(details.prefix);
@@ -1192,8 +1229,14 @@ const getPageDetails = (dom = document) => {
       },
     });
   };
+  const queueDisplayedAutoCards = () => {
+    if (!isAutoMatchEnabled()) return;
+    const cards = getDisplayedMovieCards();
+    collectRecheckCards(cards);
+    matchQueue(cards, { auto: true, immediate: true });
+  };
   movieList.forEach(hydrateMatchCard);
-  if (isAutoMatchEnabled()) matchQueue(movieList, { auto: true, immediate: true });
+  queueDisplayedAutoCards();
 
   const handleIncomingCards = (nodes) => {
     const cards = [];
@@ -1204,8 +1247,9 @@ const getPageDetails = (dom = document) => {
     });
     if (!cards.length) return;
     cards.forEach(hydrateMatchCard);
-    collectRecheckCards(cards);
-    if (isAutoMatchEnabled()) matchQueue(cards, { auto: true, immediate: true });
+    const displayedCards = cards.filter(isDisplayedMovieCard);
+    collectRecheckCards(displayedCards);
+    if (isAutoMatchEnabled()) matchQueue(displayedCards, { auto: true, immediate: true });
   };
   window.addEventListener("JavDB.scroll", ({ detail }) => {
     // The mutation observer is the durable fallback; the card flags in the
@@ -1215,8 +1259,21 @@ const getPageDetails = (dom = document) => {
   });
   new MutationObserver((records) => records.forEach((record) => handleIncomingCards(record.addedNodes)))
     .observe(document.body, { childList: true, subtree: true });
+  window.addEventListener("JavDB.filter.keywordConfigChanged", () => requestAnimationFrame(queueDisplayedAutoCards));
+  window.addEventListener("storage", ({ key }) => {
+    if (key === "JavDB.filter.keywordConfig.v1") requestAnimationFrame(queueDisplayedAutoCards);
+  });
+  new MutationObserver((records) => {
+    const root = document.documentElement;
+    const changed = records.some(({ target, oldValue }) => {
+      if (target !== root) return false;
+      const oldClasses = new Set(String(oldValue || "").split(/\s+/).filter(Boolean));
+      return ["x-score-filter-active", "x-actor-matched-only"].some((name) => oldClasses.has(name) !== root.classList.contains(name));
+    });
+    if (changed) requestAnimationFrame(queueDisplayedAutoCards);
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ["class"], attributeOldValue: true });
   window.addEventListener(AUTO_MATCH_EVENT, ({ detail }) => {
-    if (detail?.enabled) matchQueue(document.querySelectorAll(MOVIE_SELECTOR), { auto: true, immediate: true });
+    if (detail?.enabled) queueDisplayedAutoCards();
     else {
       recheckSession = null;
       cancelAutoMatchQueue();
@@ -1233,7 +1290,7 @@ const getPageDetails = (dom = document) => {
       recheckSession = { id: crypto.randomUUID(), startedAt: Date.now(), active: true, pending: 0 };
       window.dispatchEvent(new CustomEvent(RECHECK_STATUS_EVENT, { detail: { status: "running" } }));
     }
-    collectRecheckCards(document.querySelectorAll(MOVIE_SELECTOR));
+    collectRecheckCards(getDisplayedMovieCards());
     requestAnimationFrame(finishRecheckWhenExhausted);
   });
 
