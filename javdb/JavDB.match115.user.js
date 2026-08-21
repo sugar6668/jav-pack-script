@@ -1260,6 +1260,7 @@ const getPageDetails = (dom = document) => {
   new MutationObserver((records) => records.forEach((record) => handleIncomingCards(record.addedNodes)))
     .observe(document.body, { childList: true, subtree: true });
   window.addEventListener("JavDB.filter.keywordConfigChanged", () => requestAnimationFrame(queueDisplayedAutoCards));
+  window.addEventListener("JavDB.filter.visibilityChanged", () => requestAnimationFrame(queueDisplayedAutoCards));
   window.addEventListener("storage", ({ key }) => {
     if (key === "JavDB.filter.keywordConfig.v1") requestAnimationFrame(queueDisplayedAutoCards);
   });

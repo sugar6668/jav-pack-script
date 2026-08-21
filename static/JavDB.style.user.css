@@ -439,6 +439,11 @@ html.x-score-filter-active .movie-list .item.x-score-filtered {
   display: none !important;
 }
 
+html.x-purify-filter-active .movie-list .item.x-purify-keyword-match,
+html.x-manual-block-filter-active .movie-list .item.x-manual-blocked {
+  display: none !important;
+}
+
 .x-score-mask-low,
 .x-score-mask-weak {
   position: relative !important;
@@ -465,7 +470,14 @@ html.x-score-filter-active .movie-list .item.x-score-filtered {
   opacity: 0.7;
 }
 
-.toolbar .x-score-filter-toggle {
+html:not(.x-score-filter-active) {
+  .x-score-mask-low::after,
+  .x-score-mask-weak::after {
+    opacity: 0 !important;
+  }
+}
+
+.toolbar :is(.x-score-filter-toggle, .x-purify-filter-toggle, .x-filter-review-toggle, .x-manual-blocks-toggle) {
   min-width: 5.5em;
   margin-bottom: 0.5rem;
   margin-left: 0.25rem;
@@ -474,13 +486,19 @@ html.x-score-filter-active .movie-list .item.x-score-filtered {
   transition: var(--x-trans);
 }
 
-.toolbar .x-score-filter-toggle.is-filter-active {
+.toolbar :is(.x-score-filter-toggle, .x-purify-filter-toggle).is-filter-active {
   color: #fff;
   background-color: var(--x-info);
   border-color: var(--x-info);
 }
 
-.toolbar .x-score-filter-toggle.is-filter-inactive {
+.toolbar .x-filter-review-toggle.is-filter-active {
+  color: #fff;
+  background-color: var(--x-success);
+  border-color: var(--x-success);
+}
+
+.toolbar :is(.x-score-filter-toggle, .x-purify-filter-toggle, .x-filter-review-toggle, .x-manual-blocks-toggle).is-filter-inactive {
   color: #596579;
   background-color: #fff;
   border-color: #cfd8e6;

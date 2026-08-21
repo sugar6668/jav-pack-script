@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.layout
 // @namespace       JavDB.layout@blc
-// @version         0.0.8
+// @version         0.0.9
 // @author          blc
 // @description     JavDB 样式
 // @match           https://javdb.com/*
@@ -20,11 +20,19 @@
   const KEYWORD_CONFIG_EVENT = "JavDB.filter.keywordConfigChanged";
   const SCORE_CONFIG_STORAGE_KEY = "JavDB.filter.scoreConfig.v1";
   const SCORE_CONFIG_EVENT = "JavDB.filter.scoreConfigChanged";
+  const VISIBILITY_CONFIG_STORAGE_KEY = "JavDB.filter.visibilityConfig.v1";
+  const VISIBILITY_CONFIG_EVENT = "JavDB.filter.visibilityConfigChanged";
   const DEFAULT_SCORE_CONFIG = Object.freeze({
     lowRating: 3.8, weakRating: 4.0, lowVotes: 20, weakVotes: 30,
     highlightRating: 3.8, highlightVotes: 300, highlightStart: "#00ffff", highlightEnd: "#e0ffff",
     topRating: 4.0, topVotes: 1000, topStart: "#ff69b4", topEnd: "#ffb6c1",
     lowVisibility: 10, weakVisibility: 30, westernBypass: true,
+  });
+  const DEFAULT_VISIBILITY_CONFIG = Object.freeze({
+    searchSafeMode: true,
+    keywordFilterEnabled: true,
+    scoreFilterEnabled: true,
+    manualBlockFilterEnabled: true,
   });
   const DEFAULT_CONFIG = {
     pageWidth: 96,
@@ -82,6 +90,22 @@
     const normalized = normalizeScoreConfig(next);
     localStorage.setItem(SCORE_CONFIG_STORAGE_KEY, JSON.stringify(normalized));
     window.dispatchEvent(new CustomEvent(SCORE_CONFIG_EVENT));
+    return normalized;
+  };
+  const normalizeVisibilityConfig = (source = {}) => ({
+    searchSafeMode: typeof source.searchSafeMode === "boolean" ? source.searchSafeMode : DEFAULT_VISIBILITY_CONFIG.searchSafeMode,
+    keywordFilterEnabled: typeof source.keywordFilterEnabled === "boolean" ? source.keywordFilterEnabled : DEFAULT_VISIBILITY_CONFIG.keywordFilterEnabled,
+    scoreFilterEnabled: typeof source.scoreFilterEnabled === "boolean" ? source.scoreFilterEnabled : DEFAULT_VISIBILITY_CONFIG.scoreFilterEnabled,
+    manualBlockFilterEnabled: typeof source.manualBlockFilterEnabled === "boolean" ? source.manualBlockFilterEnabled : DEFAULT_VISIBILITY_CONFIG.manualBlockFilterEnabled,
+  });
+  const readVisibilityConfig = () => {
+    try { return normalizeVisibilityConfig(JSON.parse(localStorage.getItem(VISIBILITY_CONFIG_STORAGE_KEY) || "{}")); }
+    catch (_) { return { ...DEFAULT_VISIBILITY_CONFIG }; }
+  };
+  const writeVisibilityConfig = (next) => {
+    const normalized = normalizeVisibilityConfig(next);
+    localStorage.setItem(VISIBILITY_CONFIG_STORAGE_KEY, JSON.stringify(normalized));
+    window.dispatchEvent(new CustomEvent(VISIBILITY_CONFIG_EVENT, { detail: normalized }));
     return normalized;
   };
   const getPreset = (id) => BACKGROUND_PRESETS[id] || BACKGROUND_PRESETS.telegram;
@@ -205,6 +229,11 @@
     .x-layout-score-color code { color: #53627a; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
     .x-layout-score-check { display: flex; align-items: center; gap: 8px; color: #596579; font-size: 13px; cursor: pointer; }
     .x-layout-score-check input { accent-color: #3273dc; }
+    .x-layout-visibility-checks { display: grid; gap: 9px; }
+    .x-layout-visibility-check { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; color: #596579; font-size: 13px; cursor: pointer; }
+    .x-layout-visibility-check input { margin-top: 3px; accent-color: #3273dc; }
+    .x-layout-visibility-check strong { display: block; color: #46536a; font-weight: 600; }
+    .x-layout-visibility-check small { display: block; margin-top: 2px; color: #8792a5; font-size: 12px; line-height: 1.4; }
     .x-layout-score-subtitle { margin: 4px 0 -3px; color: #52637d; font-size: 12px; font-weight: 700; }
     .x-layout-score-actions { display: flex; justify-content: flex-end; }
     .x-layout-modal .modal-card-foot { flex: 0 0 auto; justify-content: flex-end; gap: 8px; padding: 14px 20px; }
@@ -253,7 +282,13 @@
       </div>
     </div>`;
 
-  const renderModal = (scoreConfig) => {
+  const visibilityCheckField = ({ id, label, hint, checked }) => `
+    <label class="x-layout-visibility-check" for="${id}">
+      <input id="${id}" type="checkbox" ${checked ? "checked" : ""}>
+      <span><strong>${label}</strong><small>${hint}</small></span>
+    </label>`;
+
+  const renderModal = (scoreConfig, visibilityConfig) => {
     const modal = document.createElement("div");
     modal.className = "modal x-layout-modal";
     modal.innerHTML = `
@@ -277,6 +312,15 @@
             <label class="x-layout-background-row" for="x-layout-background-preset"><span>\u6e10\u53d8\u914d\u8272</span><select id="x-layout-background-preset" class="x-layout-preset">${Object.entries(BACKGROUND_PRESETS).map(([id, preset]) => `<option value="${id}" ${id === config.backgroundPreset ? "selected" : ""}>${preset.name}</option>`).join("")}</select></label>
             ${field({ id: "x-layout-background-speed", label: "\u52a8\u6001\u901f\u7387", min: 0, max: 1, step: 0.05, suffix: "\u00d7", value: config.backgroundSpeed })}
             <div class="x-layout-preview" aria-label="\u5f53\u524d\u6e10\u53d8\u914d\u8272\u9884\u89c8"></div>
+          </div>
+          <div class="x-layout-section">
+            <p class="x-layout-section-title">过滤显示</p>
+            <div class="x-layout-visibility-checks">
+              ${visibilityCheckField({ id: "x-filter-search-safe-mode", label: "搜索结果安全模式", hint: "搜索页默认显示关键词和评分命中结果；手动屏蔽可通过“审查屏蔽”临时查看。", checked: visibilityConfig.searchSafeMode })}
+              ${visibilityCheckField({ id: "x-filter-keyword-enabled", label: "关键词过滤", hint: "隐藏标题或标签命中关键词的影片。", checked: visibilityConfig.keywordFilterEnabled })}
+              ${visibilityCheckField({ id: "x-filter-score-enabled", label: "评分筛选", hint: "应用低评分或低票数的隐藏规则；评分高亮不受此开关影响。", checked: visibilityConfig.scoreFilterEnabled })}
+              ${visibilityCheckField({ id: "x-filter-manual-block-enabled", label: "手动屏蔽", hint: "隐藏通过右键手动屏蔽的影片；可在工具栏“屏蔽管理”中恢复。", checked: visibilityConfig.manualBlockFilterEnabled })}
+            </div>
           </div>
           <div class="x-layout-section">
             <p class="x-layout-section-title">\u8bc4\u5206\u7b5b\u9009</p>
@@ -330,7 +374,8 @@
     navList.append(triggerWrap);
 
     let scoreConfig = readScoreConfig();
-    const modal = renderModal(scoreConfig);
+    let visibilityConfig = readVisibilityConfig();
+    const modal = renderModal(scoreConfig, visibilityConfig);
     const inputs = {
       pageWidth: modal.querySelector("#x-layout-page-width"),
       detailWidth: modal.querySelector("#x-layout-detail-width"),
@@ -350,6 +395,12 @@
       topStart: modal.querySelector("#x-score-top-start"), topEnd: modal.querySelector("#x-score-top-end"),
       lowVisibility: modal.querySelector("#x-score-low-visibility"), weakVisibility: modal.querySelector("#x-score-weak-visibility"),
       westernBypass: modal.querySelector("#x-score-western-bypass"),
+    };
+    const visibilityInputs = {
+      searchSafeMode: modal.querySelector("#x-filter-search-safe-mode"),
+      keywordFilterEnabled: modal.querySelector("#x-filter-keyword-enabled"),
+      scoreFilterEnabled: modal.querySelector("#x-filter-score-enabled"),
+      manualBlockFilterEnabled: modal.querySelector("#x-filter-manual-block-enabled"),
     };
     const keywordInputs = {
       titleKeywords: modal.querySelector('[data-keyword-input="titleKeywords"]'),
@@ -449,9 +500,20 @@
       scoreConfig = writeScoreConfig(readScoreInputs());
       setScoreInputs(scoreConfig);
     };
+    const readVisibilityInputs = () => normalizeVisibilityConfig(
+      Object.fromEntries(Object.entries(visibilityInputs).map(([key, input]) => [key, input.checked])),
+    );
+    const setVisibilityInputs = (next) => {
+      Object.entries(next).forEach(([key, value]) => { visibilityInputs[key].checked = value; });
+    };
+    const previewVisibilityConfig = () => {
+      visibilityConfig = writeVisibilityConfig(readVisibilityInputs());
+      setVisibilityInputs(visibilityConfig);
+    };
 
     syncOutputs();
     syncScoreOutputs();
+    setVisibilityInputs(visibilityConfig);
     renderKeywordChips();
 
     Object.values(inputs).forEach((input) => input.addEventListener("input", () => {
@@ -465,6 +527,7 @@
     Object.values(scoreInputs).forEach((input) => {
       input.addEventListener(input.type === "number" ? "change" : "input", previewScoreConfig);
     });
+    Object.values(visibilityInputs).forEach((input) => input.addEventListener("change", previewVisibilityConfig));
 
     Object.entries(keywordInputs).forEach(([kind, input]) => {
       input.addEventListener("keydown", (event) => {
@@ -494,8 +557,10 @@
     trigger.addEventListener("click", () => {
       keywordConfig = readKeywordConfig();
       scoreConfig = readScoreConfig();
+      visibilityConfig = readVisibilityConfig();
       renderKeywordChips();
       setScoreInputs(scoreConfig);
+      setVisibilityInputs(visibilityConfig);
       modal.classList.add("is-active");
     });
     modal.addEventListener("click", (event) => {
@@ -507,6 +572,8 @@
         applyConfig(config);
         scoreConfig = writeScoreConfig(readScoreInputs());
         setScoreInputs(scoreConfig);
+        visibilityConfig = writeVisibilityConfig(readVisibilityInputs());
+        setVisibilityInputs(visibilityConfig);
         modal.classList.remove("is-active");
       }
       if (event.target.closest("[data-layout-reset]")) {
@@ -514,9 +581,11 @@
         writeConfig(config);
         keywordConfig = writeKeywordConfig(DEFAULT_KEYWORD_CONFIG);
         scoreConfig = writeScoreConfig(DEFAULT_SCORE_CONFIG);
+        visibilityConfig = writeVisibilityConfig(DEFAULT_VISIBILITY_CONFIG);
         renderKeywordChips();
         setInputs(config);
         setScoreInputs(scoreConfig);
+        setVisibilityInputs(visibilityConfig);
         applyConfig(config);
       }
     });
