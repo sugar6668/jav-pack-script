@@ -305,12 +305,22 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     const safeRenamePreview = this.escapeHtml(this.buildPreview(details, file));
     const safeSubtitleFiles = this.escapeHtml(JSON.stringify(file.subtitleFiles || []));
     const safeMembers = this.escapeHtml(JSON.stringify(members));
+    // The offline flow renders a usable match as soon as the video is known,
+    // then continues with rename/subtitle/cover work.  Do not let a second
+    // mutation (especially a manual cover upload) queue behind that unfinished
+    // work and look like it has started already.
+    const offlineFinalizing = Boolean(file.offlineFinalizing);
+    const mutationDisabled = offlineFinalizing ? " disabled" : "";
     const coverClass = file.hasCover ? "is-success" : "is-info";
-    const coverText = file.hasCover ? "已有封面" : "传封面";
-    const coverDisabled = file.hasCover ? " disabled" : "";
+    const coverText = offlineFinalizing ? "离线收尾中" : (file.hasCover ? "已有封面" : "传封面");
+    const coverDisabled = file.hasCover || offlineFinalizing ? " disabled" : "";
+    const coverTitle = offlineFinalizing
+      ? "离线任务正在收尾，请稍后"
+      : (file.coverError ? `上次自动上传封面失败：${file.coverError}` : "");
+    const safeCoverTitle = this.escapeHtml(coverTitle);
 
     return `
-      <div class="zymatch-item" data-fid="${this.escapeHtml(file.fid || "")}" data-cid="${this.escapeHtml(file.cid || "")}" data-vr-bundle="${file.isVrBundle ? "1" : "0"}" data-members="${safeMembers}" data-has-subtitle="${file.hasSubtitle ? "1" : "0"}" data-subtitle-files="${safeSubtitleFiles}">
+      <div class="zymatch-item" data-fid="${this.escapeHtml(file.fid || "")}" data-cid="${this.escapeHtml(file.cid || "")}" data-vr-bundle="${file.isVrBundle ? "1" : "0"}" data-members="${safeMembers}" data-has-subtitle="${file.hasSubtitle ? "1" : "0"}" data-subtitle-files="${safeSubtitleFiles}" data-offline-finalizing="${offlineFinalizing ? "1" : "0"}">
         <a
           href="javascript:void(0);"
           class="x-match button is-small is-light"
@@ -323,18 +333,18 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         </a>
         <div class="buttons">
           <div class="x-match-archive-dropdown">
-            <button class="button is-small is-primary x-match-action x-match-archive-main" title="${safeActorPreview}" data-action="archive" data-archive-mode="actor" data-dir="${safeActorDir}" data-default-dir="${safeActorDir}" data-default-title="${safeActorPreview}" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">刮削归档</button>
-            <button class="button is-small is-primary x-match-archive-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="选择归档方式">
+            <button class="button is-small is-primary x-match-action x-match-archive-main" title="${safeActorPreview}" data-action="archive" data-archive-mode="actor" data-dir="${safeActorDir}" data-default-dir="${safeActorDir}" data-default-title="${safeActorPreview}" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}"${mutationDisabled}>刮削归档</button>
+            <button class="button is-small is-primary x-match-archive-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="选择归档方式"${mutationDisabled}>
               <svg class="x-match-archive-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
             </button>
             <div class="x-match-archive-menu" role="menu">
-              <button class="button is-small is-primary x-match-action x-match-archive-code" title="${safeCodePreview}" data-action="archive" data-archive-mode="code" data-dir="${safeCodeDir}" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">番号归档</button>
+              <button class="button is-small is-primary x-match-action x-match-archive-code" title="${safeCodePreview}" data-action="archive" data-archive-mode="code" data-dir="${safeCodeDir}" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}"${mutationDisabled}>番号归档</button>
             </div>
           </div>
-          <button class="button is-small is-link x-match-action" title="${safeRenamePreview}" data-action="rename" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}">重命名</button>
-          <button class="button is-small ${coverClass} x-match-action x-match-cover" data-action="cover" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}"${coverDisabled}>${coverText}</button>
-          <button class="button is-small is-danger is-light x-match-action" data-action="delv" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}">删除文件</button>
-          <button class="button is-small is-danger x-match-action" data-action="delf" data-cid="${this.escapeHtml(file.cid || "")}">删除文件夹</button>
+          <button class="button is-small is-link x-match-action" title="${safeRenamePreview}" data-action="rename" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}"${mutationDisabled}>重命名</button>
+          <button class="button is-small ${coverClass} x-match-action x-match-cover" title="${safeCoverTitle}" data-action="cover" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}"${coverDisabled}>${coverText}</button>
+          <button class="button is-small is-danger is-light x-match-action" data-action="delv" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}"${mutationDisabled}>删除文件</button>
+          <button class="button is-small is-danger x-match-action" data-action="delf" data-cid="${this.escapeHtml(file.cid || "")}"${mutationDisabled}>删除文件夹</button>
         </div>
       </div>
     `;
@@ -385,8 +395,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         // Video archival has already completed.  Return this separately so
         // the caller can refresh its real location without pretending that
         // the cover was applied.
-        if (item.isVrBundle) coverError = err?.message || "封面上传失败";
-        else console.warn("[JavPackMatch115Console.handleCover]", err?.message);
+        coverError = err?.message || "封面上传失败";
       }
     }
 
@@ -416,7 +425,10 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       hasCover,
     };
 
-    return item.isVrBundle ? { cid: targetCid, coverError } : targetCid;
+    // Preserve the long-standing string result for a normal successful archive.
+    // A cover error (and the existing VR path) carries the additional state so
+    // the caller can show a retryable warning without losing the new location.
+    return item.isVrBundle || coverError ? { cid: targetCid, coverError } : targetCid;
   }
 
   static uploadCover({ req115, queueOptions, ...args }) {
@@ -427,12 +439,21 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     if (!details.cover) throw new Error("未找到可用封面");
     const filename = this.getCoverFilename(details);
     const coverRes = await req115.handleCover(details.cover, cid, filename);
-    const fileId = coverRes?.data?.file_id || coverRes?.data?.fileid || coverRes?.file_id || coverRes?.fileid;
+    const fileId = typeof req115.getUploadedFileId === "function"
+      ? req115.getUploadedFileId(coverRes)
+      : coverRes?.data?.file_id || coverRes?.data?.fileid || coverRes?.file_id || coverRes?.fileid;
     if (!fileId) throw new Error("封面上传失败");
 
-    const editRes = await req115.filesEdit(cid, fileId);
-    if (strict && editRes?.state === false) {
-      throw new Error(editRes?.error_msg || editRes?.error || "115未能设置目录封面");
+    if (typeof req115.setFolderCover === "function") {
+      await req115.setFolderCover(cid, fileId);
+    } else {
+      const editRes = await req115.filesEdit(cid, fileId);
+      // A cover upload is not complete until the destination folder accepts it.
+      // Keep the fallback as strict as the shared Req115 helper so all manual
+      // cover actions report a failed filesEdit instead of showing a false success.
+      if (!editRes || editRes.state === false) {
+        throw this.requestError("115未能设置目录封面", editRes);
+      }
     }
     return fileId;
   }
@@ -478,6 +499,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     root.addEventListener("click", async (e) => {
       const toggle = e.target.closest(".x-match-archive-toggle");
       if (toggle && root.contains(toggle)) {
+        if (toggle.closest(".zymatch-item")?.dataset.offlineFinalizing === "1") return;
         e.preventDefault();
         e.stopPropagation();
         const dropdown = toggle.closest(".x-match-archive-dropdown");
@@ -495,6 +517,10 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       const { req115 = window.Req115 || (typeof Req115 !== "undefined" ? Req115 : null), grant = window.Grant || (typeof Grant !== "undefined" ? Grant : null), details = {} } = options;
       if (!req115) return;
       const itemNode = actionBtn.closest(".zymatch-item");
+      if (itemNode?.dataset.offlineFinalizing === "1") {
+        grant?.notify?.({ status: "info", icon: "info", msg: "离线任务正在收尾，请稍后" });
+        return;
+      }
       let members = [];
       try { members = JSON.parse(itemNode?.dataset.members || "[]"); } catch (_) {}
       const item = {
@@ -607,8 +633,9 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           btn.classList.remove("is-info");
           btn.classList.add("is-success");
           btn.textContent = "已有封面";
+          btn.title = "";
           btn.setAttribute("disabled", "");
-          const cache = options.updateCache?.("cover", item, { hasCover: true });
+          const cache = options.updateCache?.("cover", item, { hasCover: true, coverError: "" });
           options.syncCache?.("cover", cache);
         } else if (action === "delv" || action === "delf") {
           await this.deleteMatched({ req115, item, action, queueOptions });

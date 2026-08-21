@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.42
+// @version         0.0.43
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -373,6 +373,11 @@ const materializeOfflineMatch = (payload = {}) => {
       cid: payload.cid || file.cid,
       realPath: payload.realPath || file.realPath,
       hasCover: Boolean(payload.hasCover),
+      coverError: String(payload.coverError || ""),
+      // The offline task publishes a video hit before its slower subtitle,
+      // rename and cover work has settled. Keep that distinction on the
+      // source item so mutation controls cannot race the active task.
+      offlineFinalizing: payload.operation === "offline-pending",
       hasSubtitle: Boolean(subtitleFiles.length),
       subtitleFiles,
       subtitleDetectionVersion: window.JavPackMatch115Console?.subtitleDetectionVersion,
@@ -610,6 +615,7 @@ const getPageDetails = (dom = document) => {
         if (changes.rename && ext) updated.n = `${changes.rename}.${ext}`;
       } else if (operation === "cover") {
         updated.hasCover = Boolean(changes.hasCover);
+        updated.coverError = String(changes.coverError || "");
       }
       return updated;
     });
@@ -639,6 +645,10 @@ const getPageDetails = (dom = document) => {
   });
   listenClick(() => matcher(true));
   unsafeWindow[MATCH_API] = matcher;
+  // Keep the detail refresh separate from the list-page manual matcher. A
+  // detail page can also contain recommendation cards, which otherwise lets
+  // the later list initializer overwrite the generic `reMatch` entry point.
+  unsafeWindow.JavDBMatchRefreshDetail = matcher;
 
   const refresh = ({ target }) => {
     if (target.textContent === TARGET_TXT) return;
@@ -1235,6 +1245,15 @@ const getPageDetails = (dom = document) => {
     collectRecheckCards(cards);
     matchQueue(cards, { auto: true, immediate: true });
   };
+  let visibilityQueueScheduled = false;
+  const scheduleDisplayedAutoCards = () => {
+    if (visibilityQueueScheduled) return;
+    visibilityQueueScheduled = true;
+    requestAnimationFrame(() => {
+      visibilityQueueScheduled = false;
+      queueDisplayedAutoCards();
+    });
+  };
   movieList.forEach(hydrateMatchCard);
   queueDisplayedAutoCards();
 
@@ -1259,10 +1278,10 @@ const getPageDetails = (dom = document) => {
   });
   new MutationObserver((records) => records.forEach((record) => handleIncomingCards(record.addedNodes)))
     .observe(document.body, { childList: true, subtree: true });
-  window.addEventListener("JavDB.filter.keywordConfigChanged", () => requestAnimationFrame(queueDisplayedAutoCards));
-  window.addEventListener("JavDB.filter.visibilityChanged", () => requestAnimationFrame(queueDisplayedAutoCards));
+  window.addEventListener("JavDB.filter.keywordConfigChanged", scheduleDisplayedAutoCards);
+  window.addEventListener("JavDB.filter.visibilityChanged", scheduleDisplayedAutoCards);
   window.addEventListener("storage", ({ key }) => {
-    if (key === "JavDB.filter.keywordConfig.v1") requestAnimationFrame(queueDisplayedAutoCards);
+    if (key === "JavDB.filter.keywordConfig.v1") scheduleDisplayedAutoCards();
   });
   new MutationObserver((records) => {
     const root = document.documentElement;
@@ -1271,7 +1290,7 @@ const getPageDetails = (dom = document) => {
       const oldClasses = new Set(String(oldValue || "").split(/\s+/).filter(Boolean));
       return ["x-score-filter-active", "x-actor-matched-only"].some((name) => oldClasses.has(name) !== root.classList.contains(name));
     });
-    if (changed) requestAnimationFrame(queueDisplayedAutoCards);
+    if (changed) scheduleDisplayedAutoCards();
   }).observe(document.documentElement, { attributes: true, attributeFilter: ["class"], attributeOldValue: true });
   window.addEventListener(AUTO_MATCH_EVENT, ({ detail }) => {
     if (detail?.enabled) queueDisplayedAutoCards();
@@ -1333,6 +1352,9 @@ const getPageDetails = (dom = document) => {
     }
     matchQueue(findCardsByCode(payload.code), { force: true, cacheOnly: false, immediate: true });
   };
+  // Used by offline115 in the same list-page context. This applies the exact
+  // snapshot instead of invoking the list's manual matcher without a card.
+  unsafeWindow.JavDBMatchApplySnapshot = receiveMatchState;
   CHANNEL.onmessage = ({ data }) => receiveMatchState(data);
   window.addEventListener("message", ({ data, origin }) => {
     if (origin === location.origin && data?.source === "JavDB.match115") receiveMatchState(data);

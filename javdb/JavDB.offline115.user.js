@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.offline115
 // @namespace       JavDB.offline115@blc
-// @version         0.0.6
+// @version         0.0.7
 // @author          blc
 // @description     115 网盘离线
 // @match           https://javdb.com/*
@@ -131,6 +131,71 @@ const TARGET_CLASS = "x-offline";
 const CRACK_REG = Magnet.crackReg;
 const LEAK_REG = Magnet.leakReg;
 const LOAD_CLASS = "is-loading";
+const offlineButtonUI = new WeakMap();
+
+const beginOfflineButtonUI = (target, scope) => {
+  if (!target) return;
+  let ui = offlineButtonUI.get(target);
+  if (!ui) {
+    const buttonScope = scope || target.parentElement || target;
+    const buttons = [...buttonScope.querySelectorAll(`.${TARGET_CLASS}`)];
+    if (!buttons.includes(target)) buttons.push(target);
+    ui = {
+      buttons: buttons.map((button) => ({
+        button,
+        wasDisabled: button.hasAttribute("disabled"),
+      })),
+      label: target.textContent,
+    };
+    offlineButtonUI.set(target, ui);
+    ui.buttons.forEach(({ button }) => button.setAttribute("disabled", ""));
+  }
+  target.classList.remove(LOAD_CLASS);
+  target.dataset.offlineState = "preparing";
+  target.setAttribute("aria-busy", "true");
+  target.textContent = "读取资源中";
+};
+
+const setOfflineButtonState = (target, { state, queued = 0 } = {}) => {
+  if (!target || !offlineButtonUI.has(target)) return;
+  const text = {
+    queued: `排队中${queued ? ` (${queued})` : ""}`,
+    running: "离线中",
+    paused: "115 操作已暂停",
+    verifying: "等待 115 验证",
+  }[state];
+  if (!text) return;
+  target.classList.remove(LOAD_CLASS);
+  target.dataset.offlineState = state;
+  target.textContent = text;
+};
+
+const finishOfflineButtonUI = (target) => {
+  const ui = offlineButtonUI.get(target);
+  if (!ui) return;
+  ui.buttons.forEach(({ button, wasDisabled }) => {
+    if (wasDisabled) button.setAttribute("disabled", "");
+    else button.removeAttribute("disabled");
+  });
+  target.classList.remove(LOAD_CLASS);
+  target.removeAttribute("aria-busy");
+  target.textContent = ui.label;
+  delete target.dataset.offlineState;
+  offlineButtonUI.delete(target);
+};
+
+const getCoverError = (res = {}) => String(res?.coverError || res?.match?.coverError || "").trim();
+const getOfflineNotification = (res) => {
+  const coverError = getCoverError(res);
+  if (res?.status !== "success" || !coverError) return res;
+  const msg = String(res.msg || "");
+  return {
+    ...res,
+    status: "warn",
+    icon: "warn",
+    msg: msg.includes("封面未上传") ? msg : `${msg || "离线任务成功"}；封面未上传：${coverError}`,
+  };
+};
 
 const MATCH_API = "reMatch";
 const MATCH_DELAY = 750;
@@ -147,6 +212,7 @@ const syncOfflineMatch = (details, res) => {
     cid: match.cid,
     realPath: match.realPath,
     hasCover: match.hasCover,
+    coverError: getCoverError(res),
     subtitleFiles: match.subtitleFiles,
   };
   // Refresh the detail frame from the just-produced cache; no 115 re-match.
@@ -154,7 +220,21 @@ const syncOfflineMatch = (details, res) => {
     ? unsafeWindow.JavDBMatchSyncOfflinePending
     : unsafeWindow.JavDBMatchSyncOffline;
   const localSources = sync?.(payload);
-  if (localSources) unsafeWindow[MATCH_API]?.();
+  let rendered = false;
+  if (localSources) {
+    if (document.querySelector(".movie-panel-info")) {
+      if (typeof unsafeWindow.JavDBMatchRefreshDetail === "function") {
+        // The detail matcher reads the just-written cache. Do not pass the
+        // snapshot object here: its legacy first argument is the `force`
+        // flag, so an object would accidentally issue another 115 search.
+        unsafeWindow.JavDBMatchRefreshDetail();
+        rendered = true;
+      }
+    } else if (typeof unsafeWindow.JavDBMatchApplySnapshot === "function") {
+      unsafeWindow.JavDBMatchApplySnapshot(payload);
+      rendered = true;
+    }
+  }
 
   // `GM_info.script.name` differs between offline115 and match115.  Use the
   // match script's fixed channel name, then retain postMessage as a fallback.
@@ -162,7 +242,7 @@ const syncOfflineMatch = (details, res) => {
   channel.postMessage(payload);
   channel.close();
   if (window.parent !== window) window.parent.postMessage(payload, location.origin);
-  return Boolean(localSources) || window.parent !== window;
+  return rendered || window.parent !== window;
 };
 const WIKI_BASE_URL = "https://ja.wikipedia.org/wiki/";
 const ACTRESS_INFO_NOT_FOUND = "未找到演员信息";
@@ -424,11 +504,11 @@ const checkCrack = (magnets, uncensored) => {
   return magnets.map((item) => ({ ...item, uncensored: Boolean(uncensored) }));
 };
 
-const offline = async ({ options, magnets, onstart, onprogress, onmatch, onfinally }, currIdx = 0) => {
-  onstart?.();
+const offline = async ({ options, magnets, onstart, onprogress, onmatch, onState, onfinally }, currIdx = 0, started = false) => {
+  if (!started) onstart?.();
   let res;
   try {
-    res = await Req115.handleOffline(options, magnets.slice(currIdx), { onMatch: onmatch });
+    res = await Req115.handleOffline(options, magnets.slice(currIdx), { onMatch: onmatch, onState });
   } catch (err) {
     return onfinally?.({
       status: "error",
@@ -436,6 +516,7 @@ const offline = async ({ options, magnets, onstart, onprogress, onmatch, onfinal
     });
   }
   if (res.status !== "warn") return onfinally?.(res);
+  onState?.({ state: "verifying", label: "离线任务" });
   onprogress?.(res);
 
   if (GM_getValue(STATUS_KEY) !== PENDING) {
@@ -448,7 +529,7 @@ const offline = async ({ options, magnets, onstart, onprogress, onmatch, onfinal
     GM_removeValueChangeListener(listener);
     if (new_value === FAILED) return onfinally?.({ status: "error", msg: "115 验证未通过，离线任务未提交" });
     Req115.resumeMutations();
-    offline({ options, magnets, onstart, onprogress, onmatch, onfinally }, res.currIdx);
+    offline({ options, magnets, onstart, onprogress, onmatch, onState, onfinally }, res.currIdx, true);
   });
 };
 
@@ -499,23 +580,25 @@ const offline = async ({ options, magnets, onstart, onprogress, onmatch, onfinal
 
   const onstart = (target) => {
     Util.setFavicon("pend");
-    target.classList.add(LOAD_CLASS);
-    document.querySelectorAll(`.${TARGET_CLASS}`).forEach((item) => item.setAttribute("disabled", ""));
+    beginOfflineButtonUI(target, document);
+  };
+
+  const onState = (target, state) => {
+    setOfflineButtonState(target, state);
   };
 
   const onfinally = (target, res) => {
-    document.querySelectorAll(`.${TARGET_CLASS}`).forEach((item) => item.removeAttribute("disabled"));
-    target.classList.remove(LOAD_CLASS);
+    finishOfflineButtonUI(target);
     if (!res) return;
 
-    Grant.notify(res);
+    Grant.notify(getOfflineNotification(res));
     Util.setFavicon(res);
-    if (!syncOfflineMatch(details, res)) setTimeout(() => unsafeWindow[MATCH_API]?.(true), MATCH_DELAY);
+    if (!syncOfflineMatch(details, res)) setTimeout(() => unsafeWindow.JavDBMatchRefreshDetail?.(true), MATCH_DELAY);
   };
 
   const onclick = (e) => {
-    const { target } = e;
-    if (!target.classList.contains(TARGET_CLASS)) return;
+    const target = e.target.closest?.(`.${TARGET_CLASS}`);
+    if (!target) return;
 
     e.preventDefault();
     e.stopPropagation();
@@ -534,6 +617,7 @@ const offline = async ({ options, magnets, onstart, onprogress, onmatch, onfinal
       onstart: () => onstart(target),
       onprogress: Util.setFavicon,
       onmatch: (match) => syncOfflineMatch(details, { status: "success", match, operation: "offline-pending" }),
+      onState: (state) => onState(target, state),
       onfinally: (res) => onfinally(target, res),
     });
   };
@@ -641,22 +725,27 @@ const offline = async ({ options, magnets, onstart, onprogress, onmatch, onfinal
   const videoFocus = (target) => target.closest(COVER_SELECTOR)?.querySelector("video")?.focus();
 
   const onstart = (target) => {
-    target.classList.add(LOAD_CLASS);
-    target.parentElement.querySelectorAll(`.${TARGET_CLASS}`).forEach((item) => item.setAttribute("disabled", ""));
+    Util.setFavicon("pend");
+    beginOfflineButtonUI(target, target.parentElement);
   };
 
-  const onfinally = (target, res) => {
-    target.parentElement.querySelectorAll(`.${TARGET_CLASS}`).forEach((item) => item.removeAttribute("disabled"));
-    target.classList.remove(LOAD_CLASS);
+  const onState = (target, state) => {
+    setOfflineButtonState(target, state);
+  };
+
+  const onfinally = (target, details, res) => {
+    finishOfflineButtonUI(target);
     if (!res) return;
-    Grant.notify(res);
+    Grant.notify(getOfflineNotification(res));
     Util.setFavicon(res);
-    if (res.status === "success") setTimeout(() => unsafeWindow[MATCH_API]?.(target), MATCH_DELAY);
+    if (res.status === "success" && !syncOfflineMatch(details, res)) {
+      setTimeout(() => unsafeWindow[MATCH_API]?.(target), MATCH_DELAY);
+    }
   };
 
   const onclick = async (e) => {
-    const { target } = e;
-    if (!target.classList.contains(TARGET_CLASS)) return;
+    const target = e.target.closest?.(`.${TARGET_CLASS}`);
+    if (!target) return;
 
     e.preventDefault();
     e.stopPropagation();
@@ -680,10 +769,11 @@ const offline = async ({ options, magnets, onstart, onprogress, onmatch, onfinal
         options,
         magnets: checkCrack(magnets, UNC),
         onmatch: (match) => syncOfflineMatch(details, { status: "success", match, operation: "offline-pending" }),
-        onfinally: (res) => onfinally(target, res),
+        onState: (state) => onState(target, state),
+        onfinally: (res) => onfinally(target, details, res),
       });
     } catch (err) {
-      onfinally(target);
+      onfinally(target, null, { status: "error", msg: err?.message || "读取资源失败" });
       Util.print(err?.message);
     }
   };
