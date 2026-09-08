@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.offline115
 // @namespace       JavDB.offline115@blc
-// @version         0.0.7
+// @version         0.0.8
 // @author          blc
 // @description     115 网盘离线
 // @match           https://javdb.com/*
@@ -571,8 +571,12 @@ const offline = async ({ options, magnets, onstart, onprogress, onmatch, onState
     const inMagnetsStr = inMagnets.map(renderAction).join("");
     const magnetsNode = document.querySelector("#magnets-content");
 
-    const insert = (node) => node.querySelector(".buttons.column").insertAdjacentHTML("beforeend", inMagnetsStr);
-    const insertMagnets = () => magnetsNode.querySelectorAll(".item.columns").forEach(insert);
+    const insert = (node) => {
+      const buttons = node.querySelector(".buttons");
+      if (!buttons || buttons.querySelector(`.${TARGET_CLASS}`)) return;
+      buttons.insertAdjacentHTML("beforeend", inMagnetsStr);
+    };
+    const insertMagnets = () => magnetsNode?.querySelectorAll(":scope > .item").forEach(insert);
 
     window.addEventListener("JavDB.magnet", insertMagnets);
     insertMagnets();

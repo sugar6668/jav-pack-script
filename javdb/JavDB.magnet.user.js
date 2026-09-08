@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.magnet
 // @namespace       JavDB.magnet@blc
-// @version         0.0.5
+// @version         0.0.6
 // @author          blc
 // @description     磁链扩展
 // @match           https://javdb.com/v/*
@@ -116,7 +116,7 @@ Util.upStore();
   };
 
   const getMagnets = () => {
-    return [...CONT.querySelectorAll(".item.columns")]
+    return [...CONT.querySelectorAll(":scope > .item")]
       .map((node) => {
         const meta = (node.querySelector(".meta")?.textContent.trim() ?? "").split(",");
         return {
@@ -270,6 +270,12 @@ Util.upStore();
   setHeader(code);
 
   const details = GM_getValue(mid, {});
+  // Read the server rows before cached results replace the original DOM.
+  const origin = getMagnets();
+  if (origin.length) {
+    details.origin = origin;
+    GM_setValue(mid, details);
+  }
   const reviewEd2k = JSON.parse(CONT.dataset.reviewEd2k || "[]");
   if (reviewEd2k.length) details.reviewEd2k = reviewEd2k;
   if (Object.keys(details).length) setMagnets(details);

@@ -1442,22 +1442,35 @@ br + .title {
 
   .magnet-links {
     counter-reset: magnet-counter;
+    container-type: inline-size;
 
     .item {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 160px minmax(0, 42%);
+      gap: 0.75rem;
       align-items: center;
       margin: 0;
 
+      > .column {
+        padding: 0;
+      }
+
       .magnet-name {
+        min-width: 0;
         width: auto;
         font-size: var(--x-size-md);
 
         a {
-          display: flex;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 150px 150px;
           gap: 0.5rem;
           align-items: center;
         }
 
         .name {
+          min-width: 0;
+          grid-column: 1;
+          grid-row: 1;
           display: -webkit-box;
           flex: 1;
           overflow: hidden;
@@ -1474,12 +1487,16 @@ br + .title {
         }
 
         .meta {
+          grid-column: 2;
+          grid-row: 1;
           flex-shrink: 0;
           width: 150px;
           font-size: var(--x-size-md);
         }
 
         .tags {
+          grid-column: 3;
+          grid-row: 1;
           flex-shrink: 0;
           width: 150px;
           padding-top: 0;
@@ -1496,11 +1513,17 @@ br + .title {
 
       .buttons {
         order: 3;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 0.35rem;
+        min-width: 0;
+        margin-top: 0;
         margin-bottom: 0;
         font-size: 0;
 
         .button {
-          margin-bottom: 0;
+          margin: 0 !important;
           border-radius: 1px;
         }
 
@@ -1509,6 +1532,40 @@ br + .title {
         }
       }
     }
+  }
+}
+
+@container (max-width: 1400px) {
+  .video-panel .magnet-links .item {
+    grid-template-columns: minmax(0, 1fr) 160px;
+  }
+  .video-panel .magnet-links .item .buttons {
+    grid-column: 1 / -1;
+  }
+}
+
+@container (max-width: 700px) {
+  .video-panel .magnet-links .item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .video-panel .magnet-links .item .magnet-name a {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .video-panel .magnet-links .item .magnet-name .name {
+    grid-column: 1 / -1;
+  }
+  .video-panel .magnet-links .item .magnet-name .meta {
+    grid-column: 1;
+    grid-row: 2;
+    width: auto;
+  }
+  .video-panel .magnet-links .item .magnet-name .tags {
+    grid-column: 2;
+    grid-row: 2;
+    width: auto;
+  }
+  .video-panel .magnet-links .item .buttons {
+    justify-content: flex-start;
   }
 }
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.43
+// @version         0.0.45
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -24,7 +24,6 @@
 // @grant           GM_openInTab
 // @grant           GM_getValue
 // @grant           GM_setValue
-// @grant           GM_info
 // @require         https://github.com/Tampermonkey/utils/raw/d8a4543a5f828dfa8eefb0a3360859b6fe9c3c34/requires/gh_2215_make_GM_xhr_more_parallel_again.js
 // ==/UserScript==
 
@@ -34,7 +33,11 @@ const TARGET_TXT = "匹配中";
 const TARGET_CLASS = "x-match";
 
 const VOID = "javascript:void(0);";
-const CHANNEL = new BroadcastChannel(GM_info.script.name);
+// The detail iframe and the source list can be running different userscript
+// versions.  The transport name must describe the protocol, not the current
+// script metadata, otherwise an update can silently split the two endpoints.
+const MATCH_CHANNEL_NAME = "JavDB.match115";
+const CHANNEL = new BroadcastChannel(MATCH_CHANNEL_NAME);
 const MATCH_API = "reMatch";
 const UNMATCHED_TXT = "未匹配";
 const AUTO_MATCH_STORAGE_KEY = "JavDB.match115.autoEnabled";
@@ -385,16 +388,57 @@ const materializeOfflineMatch = (payload = {}) => {
   });
 };
 
+const getOfflineSourceKey = (item = {}) => {
+  const fid = String(item.fid || "").trim();
+  if (fid) return `fid:${fid}`;
+  const cid = String(item.cid || "").trim();
+  const name = String(item.n || item.name || item.file_name || "").trim().toLowerCase();
+  return cid || name ? `file:${cid}:${name}` : "";
+};
+
+const mergeOfflineSources = (existing = [], incoming = []) => {
+  const merged = [];
+  const indexes = new Map();
+  const append = (item) => {
+    if (!item || typeof item !== "object") return;
+    const key = getOfflineSourceKey(item);
+    const index = key ? indexes.get(key) : undefined;
+    if (index !== undefined) {
+      const previous = merged[index];
+      const next = { ...previous, ...item };
+      // A pending offline snapshot only has the new video's early fields. Do
+      // not erase a directory, cover, or subtitle already known for the same
+      // file when 115 returns the final metadata a little later.
+      if (item.offlineFinalizing) {
+        if (previous.realPath && !item.realPath) next.realPath = previous.realPath;
+        if (previous.hasCover && !item.hasCover) next.hasCover = true;
+        if (previous.hasSubtitle && !item.hasSubtitle) {
+          next.hasSubtitle = true;
+          next.subtitleFiles = previous.subtitleFiles || [];
+        }
+      }
+      merged[index] = next;
+      return;
+    }
+    if (key) indexes.set(key, merged.length);
+    merged.push(item);
+  };
+  existing.forEach(append);
+  incoming.forEach(append);
+  return merged;
+};
+const getCachedSources = (code) => MatchCache.getFreshRecord(code)?.data || MatchCache.get(code) || [];
+
 unsafeWindow.JavDBMatchSyncOffline = (payload) => {
   if (!payload?.code || !Array.isArray(payload.data)) return null;
-  const sources = materializeOfflineMatch(payload);
+  const sources = mergeOfflineSources(getCachedSources(payload.code), materializeOfflineMatch(payload));
   MatchCache.set(payload.code, sources);
   return sources;
 };
 
 unsafeWindow.JavDBMatchSyncOfflinePending = (payload) => {
   if (!payload?.code || !Array.isArray(payload.data)) return null;
-  const sources = materializeOfflineMatch(payload);
+  const sources = mergeOfflineSources(getCachedSources(payload.code), materializeOfflineMatch(payload));
   MatchCache.setMetadataPending(payload.code, sources);
   return sources;
 };
@@ -582,12 +626,15 @@ const getPageDetails = (dom = document) => {
   const code = CONT.querySelector(".first-block .value").textContent.trim();
   const codeDetails = getPageDetails() || Util.codeParse(code);
   const block = addBlock();
-  const syncQuickViewState = (operation, data) => {
-    const payload = { source: "JavDB.match115", type: "sync", id: crypto.randomUUID(), operation, code, data: Array.isArray(data) ? data : [] };
+  const postMatchState = (payload) => {
     CHANNEL.postMessage(payload);
     // Same-origin parent messaging is an immediate fallback for QuickView;
     // BroadcastChannel delivery can otherwise race with iframe removal.
     if (window.parent !== window) window.parent.postMessage(payload, location.origin);
+  };
+  const syncQuickViewState = (operation, data) => {
+    const payload = { source: "JavDB.match115", type: "sync", id: crypto.randomUUID(), operation, code, data: Array.isArray(data) ? data : [] };
+    postMatchState(payload);
   };
   const updateMatchCache = (operation, item, changes = {}) => {
     const cache = MatchCache.get(code) || [];
@@ -702,7 +749,14 @@ const getPageDetails = (dom = document) => {
     block.cont.innerHTML = renderMatches(next);
     syncQuickViewState("subtitle", next);
   });
-  window.addEventListener("beforeunload", () => CHANNEL.postMessage(code));
+  // A code-only notification lets the source list read the fresh GM record if
+  // an exact mutation snapshot was written just before the iframe closed.
+  window.addEventListener("beforeunload", () => postMatchState({
+    source: "JavDB.match115",
+    type: "state",
+    operation: "close",
+    code,
+  }));
 })();
 
 (function () {
@@ -1058,7 +1112,7 @@ const getPageDetails = (dom = document) => {
       if (!job) return;
       const { searchKey } = job;
       queuedKeys.delete(searchKey);
-      const activePending = (wait[searchKey] || []).filter((it) => !cancelHiddenAutoItem(it));
+      const activePending = (wait[searchKey] || []).filter((it) => !it.cancelled && !cancelHiddenAutoItem(it));
       if (!activePending.length) {
         delete wait[searchKey];
         return match();
@@ -1067,7 +1121,7 @@ const getPageDetails = (dom = document) => {
       loading = true;
       try {
         const { data = [] } = await withMatchTimeout(Req115.filesSearchAllVideos(searchKey));
-        const pendingItems = (wait[searchKey] || []).filter((it) => !cancelHiddenAutoItem(it));
+        const pendingItems = (wait[searchKey] || []).filter((it) => !it.cancelled && !cancelHiddenAutoItem(it));
         if (pendingItems.length) wait[searchKey] = pendingItems;
         else delete wait[searchKey];
         const matchedData = data.filter((item) => pendingItems.some(({ regex }) => regex.test(item.n)));
@@ -1136,6 +1190,39 @@ const getPageDetails = (dom = document) => {
       if (isIntersecting) obs.unobserve(target) || requestAnimationFrame(() => dispatch(target, { auto: true }));
     });
     const obs = new IntersectionObserver(callback, { threshold: 0.25 });
+    const cancelForCode = (code) => {
+      const normalized = normalizeMatchCode(code);
+      if (!normalized) return;
+      const matchesCode = (it) => [it.code, it.prefix].some((value) => normalizeMatchCode(value) === normalized);
+      Object.entries(wait).forEach(([searchKey, pending]) => {
+        const keep = pending.filter((it) => {
+          if (!matchesCode(it)) return true;
+          it.cancelled = true;
+          settleItem(it);
+          return false;
+        });
+        if (keep.length) wait[searchKey] = keep;
+        else delete wait[searchKey];
+      });
+      probeQueues.forEach((queue) => {
+        for (let index = queue.length - 1; index >= 0; index--) {
+          const job = queue[index];
+          if ((wait[job.searchKey] || []).length) continue;
+          queue.splice(index, 1);
+          queuedKeys.delete(job.searchKey);
+        }
+      });
+      for (let index = metadataQueue.length - 1; index >= 0; index--) {
+        const job = metadataQueue[index];
+        if (!matchesCode(job.it)) continue;
+        metadataQueue.splice(index, 1);
+        job.it.cancelled = true;
+        settleItem(job.it);
+      }
+      metadataCurrent.forEach((job) => {
+        if (matchesCode(job.it)) job.it.cancelled = true;
+      });
+    };
     const cancelAuto = () => {
       Object.entries(wait).forEach(([key, pending]) => {
         const keep = pending.filter((it) => {
@@ -1168,10 +1255,15 @@ const getPageDetails = (dom = document) => {
     const setLaneStatus = (lane, status) => {
       if (lane !== "normal") emit(lane, status);
     };
-    return { enqueue, cancelAuto, setLaneStatus };
+    return { enqueue, cancelAuto, cancelForCode, setLaneStatus };
   };
 
-  const { enqueue: matchQueue, cancelAuto: cancelAutoMatchQueue, setLaneStatus } = useMatchQueue(matchBefore, matchAfter);
+  const {
+    enqueue: matchQueue,
+    cancelAuto: cancelAutoMatchQueue,
+    cancelForCode: cancelMatchForCode,
+    setLaneStatus,
+  } = useMatchQueue(matchBefore, matchAfter);
   const handledSyncs = new Set();
   let recheckSession = null;
 
@@ -1183,6 +1275,22 @@ const getPageDetails = (dom = document) => {
     if (record.phase === "metadata") return renderMetadataPending(details);
     matchAfter(details, record.data);
   };
+  const renderSyncedCard = (details, data, metadataPending, force = false) => {
+    const node = details.target.closest(MOVIE_SELECTOR);
+    if (force) {
+      // An explicit cross-frame snapshot is authoritative.  Clear a stale
+      // manual request token before repainting so the normal guard cannot hide
+      // the update and leave the card correct only after a full page reload.
+      delete details.target.dataset.uid;
+      delete details.target.dataset.manualMatchPending;
+    }
+    if (metadataPending) {
+      node.dataset.matchPending = "1";
+      renderMetadataPending(details);
+    } else {
+      matchAfter(details, data);
+    }
+  };
   const hydrateSyncedCards = (code) => {
     let foundState = false;
     findCardsByCode(code).forEach((node) => {
@@ -1191,8 +1299,7 @@ const getPageDetails = (dom = document) => {
       const record = MatchCache.getFreshRecord(details.code) ?? MatchCache.getFreshRecord(details.prefix);
       if (!record) return;
       foundState = true;
-      if (record.phase === "metadata") renderMetadataPending(details);
-      else matchAfter(details, record.data);
+      renderSyncedCard(details, record.data, record.phase === "metadata");
     });
     return foundState;
   };
@@ -1324,7 +1431,11 @@ const getPageDetails = (dom = document) => {
     }
     const isSnapshot = (payload.type === "sync" || payload.type === "offline") && Array.isArray(payload.data);
     if (isSnapshot) {
-      const sources = payload.type === "offline" ? materializeOfflineMatch(payload) : payload.data;
+      cancelMatchForCode(payload.code);
+      let sources = payload.type === "offline" ? materializeOfflineMatch(payload) : payload.data;
+      if (payload.type === "offline") {
+        sources = mergeOfflineSources(getCachedSources(payload.code), sources);
+      }
       const metadataPending = payload.operation === "offline-pending";
       if (metadataPending) MatchCache.setMetadataPending(payload.code, sources);
       else MatchCache.set(payload.code, sources);
@@ -1333,8 +1444,9 @@ const getPageDetails = (dom = document) => {
       findCardsByCode(payload.code).forEach((node) => {
         const details = matchBefore(node);
         if (!details) return;
-        if (metadataPending) renderMetadataPending(details);
-        else matchAfter(details, sources);
+        // The detail frame has already committed this exact snapshot.  Do not
+        // let an older manual-match marker suppress the card repaint.
+        renderSyncedCard(details, sources, metadataPending, true);
       });
       // The parent receives an exact post-mutation snapshot before the Quick
       // View frame disappears, so it can repaint without querying 115 again.
@@ -1360,7 +1472,7 @@ const getPageDetails = (dom = document) => {
     if (origin === location.origin && data?.source === "JavDB.match115") receiveMatchState(data);
   });
 
-  const queueManualMatch = async (node, { clearCache = false } = {}) => {
+  const queueManualMatch = async (node) => {
     const movie = node.closest(MOVIE_SELECTOR);
     if (!movie) return;
 
@@ -1371,10 +1483,10 @@ const getPageDetails = (dom = document) => {
     const parsed = matchBefore(movie);
     if (!parsed) return;
     const details = { ...parsed, manual: true };
-    const fallback = clearCache
-      ? null
-      : MatchCache.getRecord(details.code) ?? MatchCache.getRecord(details.prefix);
-    if (clearCache) MatchCache.del(code);
+    const fallback = MatchCache.getRecord(details.code) ?? MatchCache.getRecord(details.prefix);
+    // Force matching bypasses the automatic queue, but the old local result
+    // stays available as a safe fallback while 115 indexes the new file.
+    cancelMatchForCode(details.code);
     const requestId = crypto.randomUUID();
     target.dataset.uid = requestId;
     target.dataset.manualMatchPending = requestId;
@@ -1394,19 +1506,30 @@ const getPageDetails = (dom = document) => {
 
       const scoped = extractData(data.filter((item) => details.regex.test(item.n)));
       if (!scoped.length) {
-        MatchCache.set(code, []);
-        matchAfter(details, []);
+        if (fallback?.data?.length) {
+          MatchCache.set(code, fallback.data);
+          matchAfter(details, fallback.data);
+        } else {
+          MatchCache.set(code, []);
+          matchAfter(details, []);
+        }
         return;
       }
 
-      MatchCache.setMetadataPending(code, scoped);
+      const scopedWithFallback = fallback?.data?.length
+        ? mergeOfflineSources(fallback.data, scoped)
+        : scoped;
+      MatchCache.setMetadataPending(code, scopedWithFallback);
       renderMetadataPending(details);
-      let sources = scoped;
+      let sources = scopedWithFallback;
       try {
-        sources = await withMatchTimeout(
+        const enriched = await withMatchTimeout(
           enrichMetadata(scoped, details),
           "115 手动强制匹配元数据补全超时",
         );
+        sources = fallback?.data?.length
+          ? mergeOfflineSources(fallback.data, enriched)
+          : enriched;
       } catch (err) {
         // The video hit is authoritative; metadata timeout must not leave the
         // card in a permanent pending state.
@@ -1417,8 +1540,13 @@ const getPageDetails = (dom = document) => {
       matchAfter(details, sources);
     } catch (err) {
       if (target.dataset.uid !== requestId) return;
-      if (fallback?.data) matchAfter(details, fallback.data);
-      else renderUnknown(details);
+      if (fallback?.data?.length) {
+        MatchCache.set(code, fallback.data);
+        matchAfter(details, fallback.data);
+      } else if (fallback) {
+        MatchCache.set(code, []);
+        matchAfter(details, []);
+      } else renderUnknown(details);
       Util.print(err?.message);
     } finally {
       if (target.dataset.uid === requestId) {
@@ -1452,7 +1580,7 @@ const getPageDetails = (dom = document) => {
 
     button.disabled = true;
     button.classList.add("is-loading");
-    queueManualMatch(target, { clearCache: true });
+    queueManualMatch(target);
   };
 
   unsafeWindow[MATCH_API] = queueManualMatch;
