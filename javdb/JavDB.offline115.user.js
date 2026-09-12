@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.offline115
 // @namespace       JavDB.offline115@blc
-// @version         0.0.8
+// @version         0.0.9
 // @author          blc
 // @description     115 网盘离线
 // @match           https://javdb.com/*
@@ -287,7 +287,9 @@ const getActorItems = (dom = document) => {
     const text = nodes.map((item) => item.textContent || "").join("");
     const name = node.textContent.trim();
 
-    return { node, nodes, index, name, isFemale: /♀/.test(text) };
+    const isFemale = node.classList.contains("actor-female") || /♀/.test(text);
+    const isMale = !isFemale && (node.classList.contains("actor-male") || /♂/.test(text));
+    return { node, index, name, isFemale, isMale };
   }).filter((item) => item.name);
 };
 
@@ -352,9 +354,14 @@ const sortActorsByGender = (actorItems) => {
   const parent = actorItems[0]?.node.parentElement;
   if (!parent) return;
 
-  sorted.forEach((item) => {
-    item.nodes.forEach((node) => parent.appendChild(node));
+  const fragment = parent.ownerDocument.createDocumentFragment();
+  sorted.forEach((item, index) => {
+    if (index) fragment.append(", ");
+    fragment.append(item.node);
+    const symbol = item.isFemale ? "♀" : item.isMale ? "♂" : "";
+    if (symbol) fragment.append(` ${symbol}`);
   });
+  parent.replaceChildren(fragment);
 };
 
 const ensureActressInfo = async (dom = document) => {
@@ -438,10 +445,11 @@ const getDetails = (dom = document) => {
           .filter(Boolean);
         break;
       case "演員:":
-        info.actors = value
-          .split("\n")
-          .map((item) => item.trim())
-          .filter(Boolean);
+        // Read individual links; current JavDB uses actor-female instead of gender text.
+        // Only confirmed actresses are eligible for actor-based offline destinations.
+        info.actors = getActorItems(dom)
+          .filter((actor) => actor.isFemale)
+          .map((actor) => `${actor.name} ♀`);
         break;
     }
   });
