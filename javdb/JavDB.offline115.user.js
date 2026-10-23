@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.offline115
 // @namespace       JavDB.offline115@blc
-// @version         0.0.9
+// @version         0.0.10
 // @author          blc
 // @description     115 网盘离线
 // @match           https://javdb.com/*
@@ -512,11 +512,11 @@ const checkCrack = (magnets, uncensored) => {
   return magnets.map((item) => ({ ...item, uncensored: Boolean(uncensored) }));
 };
 
-const offline = async ({ options, magnets, onstart, onprogress, onmatch, onState, onfinally }, currIdx = 0, started = false) => {
+const offline = async ({ options, magnets, onstart, onprogress, onmatch, onState, onfinally, requester = Req115 }, currIdx = 0, started = false) => {
   if (!started) onstart?.();
   let res;
   try {
-    res = await Req115.handleOffline(options, magnets.slice(currIdx), { onMatch: onmatch, onState });
+    res = await requester.handleOffline(options, magnets.slice(currIdx), { onMatch: onmatch, onState });
   } catch (err) {
     return onfinally?.({
       status: "error",
@@ -537,9 +537,126 @@ const offline = async ({ options, magnets, onstart, onprogress, onmatch, onState
     GM_removeValueChangeListener(listener);
     if (new_value === FAILED) return onfinally?.({ status: "error", msg: "115 验证未通过，离线任务未提交" });
     Req115.resumeMutations();
-    offline({ options, magnets, onstart, onprogress, onmatch, onState, onfinally }, res.currIdx, true);
+    offline({ options, magnets, onstart, onprogress, onmatch, onState, onfinally, requester }, res.currIdx, true);
   });
 };
+
+// JSON strings cross userscript sandboxes without exposing privileged functions.
+const REVIEW_OFFLINE_REQUEST = "JavDB.reviewOffline.request.v1";
+const REVIEW_OFFLINE_RESPONSE = "JavDB.reviewOffline.response.v1";
+const reviewOfflineJobs = new Set();
+const reviewOfflineDetails = new Map();
+
+class ReviewReq115 extends Req115 {
+  static handleVerify(infoHash, ...args) {
+    // Never match an unrelated task when a submitted URL has no returned hash.
+    if (typeof infoHash !== "string" || !infoHash.trim()) {
+      return Promise.resolve({ file_id: "", videos: [], allVideos: [], pending: true });
+    }
+    return super.handleVerify(infoHash, ...args);
+  }
+}
+
+const parseReviewOfflineLink = (raw) => {
+  const url = String(raw || "").trim();
+  const ed2k = url.match(/^ed2k:\/\/\|file\|([^|\r\n<>]+)\|(\d+)\|([a-f\d]{32})\|(?:[a-z][\w-]*=[^|\s<>]+\|)*\/(?:\|sources,[^|\s<>]+\|\/)?$/i);
+  let name;
+  let size = 0;
+  if (ed2k) {
+    name = decodeMagnetUrl(ed2k[1]);
+    size = Number(ed2k[2]);
+  } else {
+    if (!/^magnet:\?/i.test(url) || /[\s<>"'`]/.test(url)) throw new Error("不支持的评论资源链接");
+    const params = new URLSearchParams(url.slice(url.indexOf("?") + 1));
+    const valid = params.getAll("xt").some((value) => /^urn:btih:(?:[a-f\d]{40}|[a-z2-7]{32})$/i.test(value)
+      || /^urn:btmh:1220[a-f\d]{64}$/i.test(value));
+    if (!valid) throw new Error("磁力链接没有有效的 BTIH/BTMH 标识");
+    name = params.get("dn") || "评论磁力链接";
+    size = Number(params.get("xl")) || 0;
+  }
+  const source = `${name} ${decodeMagnetUrl(url)}`;
+  return { url, name, size, zh: Magnet.zhReg.test(source), crack: CRACK_REG.test(source), leaked: LEAK_REG.test(source) };
+};
+
+const getReviewOfflineContext = async (request) => {
+  const movieId = String(request.movieId || "");
+  const url = new URL(request.movieUrl, location.origin);
+  if (!/^[a-zA-Z0-9]+$/.test(movieId) || url.origin !== location.origin || url.pathname !== `/v/${movieId}` || url.search || url.hash) {
+    throw new Error("影片地址与影片 ID 不匹配");
+  }
+  let entry = reviewOfflineDetails.get(movieId);
+  if (!entry || Date.now() - entry.at > 300000) {
+    const dom = location.pathname.replace(/\/$/, "") === url.pathname && document.querySelector(".movie-panel-info")
+      ? document : await Req.request(url.href);
+    const details = getDetails(dom);
+    if (!details?.code) throw new Error("无法读取影片资料，未提交离线任务");
+    entry = { at: Date.now(), details, uncensored: isUncensored(dom) };
+    reviewOfflineDetails.set(movieId, entry);
+  }
+  const config = await getConfig();
+  const actions = Offline.getActions(config, entry.details);
+  return { ...entry, actions, config };
+};
+
+const initReviewOfflineBridge = () => {
+  if (location.hostname !== "javdb.com") return;
+  document.documentElement.dataset.javdbReviewOfflineBridge = "1";
+  document.addEventListener(REVIEW_OFFLINE_REQUEST, async (event) => {
+    let request;
+    try { request = JSON.parse(event.detail); } catch { return; }
+    if (!request || typeof request.id !== "string" || request.id.length > 128 || !["actions", "submit"].includes(request.type)) return;
+    const respond = (kind, data = {}) => document.dispatchEvent(new CustomEvent(REVIEW_OFFLINE_RESPONSE, {
+      detail: JSON.stringify({ id: request.id, kind, ...data }),
+    }));
+    respond("accepted");
+    let jobKey;
+    let ownsJob = false;
+    try {
+      const context = await getReviewOfflineContext(request);
+      const { details, actions, config } = context;
+      if (request.type === "actions") {
+        respond("result", { result: { code: details.code, actions: actions.map((action) => ({
+          index: action.index, idx: action.idx, name: action.name, dir: action.dir.join("/"),
+          actor: config[action.index]?.type === "actors",
+        })) } });
+        return;
+      }
+      const magnet = parseReviewOfflineLink(request.url);
+      const action = actions.find((item) => item.index === request.action?.index && item.idx === request.action?.idx);
+      if (!action || action.dir.join("/") !== request.destination) throw new Error("归档目录配置已变化，请刷新离线目录后重试");
+      jobKey = `${request.movieId}\n${magnet.url}`;
+      if (reviewOfflineJobs.has(jobKey)) throw new Error("这个影片链接正在离线，请等待当前任务结束");
+      reviewOfflineJobs.add(jobKey);
+      ownsJob = true;
+      const { magnetOptions: _magnetOptions, ...options } = Offline.getOptions(action, details);
+      await new Promise((resolve, reject) => offline({
+        requester: ReviewReq115,
+        options,
+        magnets: checkCrack([magnet], context.uncensored),
+        onstart: () => { Util.setFavicon("pend"); respond("progress", { state: { state: "preparing" } }); },
+        onprogress: Util.setFavicon,
+        onState: (state) => respond("progress", { state }),
+        onmatch: (match) => syncOfflineMatch(details, { status: "success", match, operation: "offline-pending" }),
+        onfinally: (result) => {
+          try {
+            Grant.notify(getOfflineNotification(result));
+            Util.setFavicon(result);
+            syncOfflineMatch(details, result);
+          } finally {
+            respond("result", { result: { status: result.status, msg: result.msg, realPath: result.match?.realPath || "" } });
+            resolve();
+          }
+        },
+      }).catch(reject));
+    } catch (error) {
+      respond("error", { message: error?.message || "评论链接离线失败" });
+    } finally {
+      if (ownsJob) reviewOfflineJobs.delete(jobKey);
+    }
+  });
+};
+
+initReviewOfflineBridge();
 
 (function () {
   if (location.host === HOST) return Verify115.verify();
