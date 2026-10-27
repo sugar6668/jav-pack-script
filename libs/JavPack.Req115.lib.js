@@ -766,18 +766,255 @@ class Req115 extends Drive115 {
 
 // BEGIN SAFE115_ARCHIVE_V1
 const create115SafeArchive = (Base) => class Safe115Archive extends Base {
-  static SAFE_ARCHIVE_VERSION = "2026-10-25.1";
+  static SAFE_ARCHIVE_VERSION = "2026-10-27.1";
   static archiveId(value) { return value == null ? "" : String(value); }
-  static archiveFailure(message) { return new Error("安全保护：" + message + "，已停止整理；离线任务和文件保留"); }
+  static archiveFailure(message) { return new Error("安全保护：" + message + "，已停止后续操作；未确认的文件和目录保留"); }
   static archiveAck(response, operation) {
     if (response?.state !== true && response?.state !== 1) throw this.archiveFailure(operation + "未得到成功确认");
     return response;
+  }
+  static archiveName(file = {}) { return String(file.n ?? file.name ?? file.file_name ?? ""); }
+  static archiveText(value) { return String(value || "").normalize("NFKC").replace(/[‐‑‒–—−]/g, "-").toUpperCase(); }
+  static archiveCodePattern(code) {
+    const text = this.archiveText(code);
+    if (!/^[A-Z0-9\s._-]+$/.test(text) || !/\d/.test(text)) return "";
+    const sep = "[\\s._-]*";
+    const parts = text.match(/[A-Z]+|\d+/g) || [];
+    const pattern = /^FC2(?:[\s._-]*PPV)?[\s._-]*\d+$/.test(text)
+      ? "FC2" + sep + "(?:PPV" + sep + ")?" + parts.at(-1)
+      : parts.join(sep);
+    return pattern ? "(?<![A-Z0-9])" + pattern + "(?![A-Z0-9])" : "";
+  }
+  static archiveMatchesCode(name, code) {
+    const pattern = this.archiveCodePattern(code);
+    return Boolean(pattern && new RegExp(pattern).test(this.archiveText(name)));
+  }
+  static archiveHasForeignCode(name, code) {
+    let text = this.archiveText(name).replace(/[0-9A-F]{8}-(?:[0-9A-F]{4}-){3}[0-9A-F]{12}/g, "");
+    const pattern = this.archiveCodePattern(code);
+    if (pattern) text = text.replace(new RegExp(pattern, "g"), " ");
+    const tokens = text.match(/(?<![A-Z0-9])(?:FC2[\s._-]*(?:PPV[\s._-]*)?\d{5,10}|\d{0,3}[A-Z]{1,12}\d{0,3}[\s._-]+\d{2,10}[A-Z]{0,3}|[A-Z]{2,12}\d{2,10}[A-Z]{0,3}|\d{6}[-_]\d{2,4})(?![A-Z0-9])/g) || [];
+    return tokens.some((token) => !/^(?:CD|DISC|PART|PT|EP|MP)[\s._-]*\d+$/.test(token));
+  }
+  static archivePart(name) {
+    const text = this.archiveText(name);
+    const match = text.match(/(?:^|[^A-Z0-9])(?:CD|DISC|PART|PT|EP)[\s._-]*(\d{1,3})(?=$|[^A-Z0-9])/)
+      || text.match(/\.(\d{2})(?=(?:\.[^.]+){0,2}\.(?:MP4|MKV|AVI|WMV|SRT|ASS|SSA|VTT|SUB|IDX)$)/);
+    return match ? Number(match[1]) : null;
+  }
+  static archiveSubtitle(file) { return /\.(srt|ass|ssa|vtt|sub|idx)$/i.test(this.archiveName(file)); }
+  static archiveAttachmentScore(video, attachment, code) {
+    const name = this.archiveName(attachment);
+    const videoName = this.archiveName(video);
+    if (!/\.(srt|ass|ssa|vtt|sub|idx|nfo)$/i.test(name)
+      && !/\.(?:cover|poster|fanart|thumb)\.(?:jpe?g|png|webp)$/i.test(name)) return 0;
+    if (![name, videoName].every((value) => this.archiveMatchesCode(value, code) && !this.archiveHasForeignCode(value, code))) return 0;
+    if (this.archiveSubtitle(attachment) && this.archivePart(name) !== this.archivePart(videoName)) return 0;
+    const stem = this.archiveText(videoName.replace(/\.[^.]+$/, ""));
+    const attachmentStem = this.archiveText(name.replace(/\.[^.]+$/, ""));
+    return attachmentStem === stem || [".", "-", "_", " "].some((sep) => attachmentStem.startsWith(stem + sep)) ? 2 : 1;
+  }
+  static archiveAttachments(sourceFiles, videos, code) {
+    const selected = new Set(videos.map((file) => this.archiveId(file.fid)));
+    const alternatives = sourceFiles.filter((file) => this.archiveVideo(file) && !selected.has(this.archiveId(file.fid)) && !this.archiveJunk(file, videos, code));
+    return sourceFiles.filter((file) => {
+      if (!file.fid || selected.has(this.archiveId(file.fid))) return false;
+      const score = Math.max(0, ...videos.map((video) => this.archiveAttachmentScore(video, file, code)));
+      if (!score || alternatives.some((video) => this.archiveAttachmentScore(video, file, code) >= score)) return false;
+      // VobSub indexes are useful only with their matching .sub payload.
+      return !/\.idx$/i.test(this.archiveName(file)) || sourceFiles.some((other) =>
+        this.archiveId(other.cid) === this.archiveId(file.cid)
+        && this.archiveText(this.archiveName(other)) === this.archiveText(this.archiveName(file).replace(/\.idx$/i, ".sub")));
+    });
+  }
+  static archiveRenamedFiles(files, videos, rename) {
+    const sorted = [...videos].sort((a, b) => this.archiveName(a).localeCompare(this.archiveName(b), undefined, { numeric: true }));
+    const bases = new Map(sorted.map((file, index) => [this.archiveId(file.fid), rename
+      + (this.archivePart(this.archiveName(file)) != null ? ".CD" + this.archivePart(this.archiveName(file))
+        : sorted.length > 1 ? "." + String(index + 1).padStart(2, "0") : "")]));
+    const used = new Set();
+    return files.map((file) => {
+      const name = this.archiveName(file);
+      const ext = name.split(".").at(-1).toLowerCase();
+      let base = bases.get(this.archiveId(file.fid));
+      if (!base) {
+        const part = this.archivePart(name);
+        base = rename + (part != null ? ".CD" + part : "");
+        if (this.archiveSubtitle(file)) {
+          const language = name.match(/(?:[.\s_-])((?:zh[-_](?:cn|tw|hans|hant)|chs|cht|chi|zho|eng|en|jpn|ja|简体|繁体|双语)(?:[._-](?:forced|sdh))?)(?=\.[^.]+$)/i);
+          if (language) base += "." + language[1].toLowerCase().replaceAll("_", "-");
+        } else if (/\.(?:cover|poster|fanart|thumb)\./i.test(name)) {
+          base += "." + name.match(/\.(cover|poster|fanart|thumb)\./i)[1].toLowerCase();
+        }
+      }
+      let renamed = base + "." + ext;
+      for (let index = 2; used.has(renamed.toLowerCase()); index++) renamed = base + "." + index + "." + ext;
+      used.add(renamed.toLowerCase());
+      return { ...file, ico: ext, n: renamed };
+    });
+  }
+  static archiveFileStamp(file) {
+    return JSON.stringify([this.archiveId(file.fid), this.archiveId(file.cid), this.archiveName(file),
+      String(file.s ?? file.size ?? ""), String(file.sha ?? file.sha1 ?? "")]);
+  }
+  static archiveSharedSource(cid, remember = false) {
+    this.sharedArchiveSources ??= new Set();
+    try {
+      const stored = typeof GM_getValue === "function" ? GM_getValue("JavPack.archive.sharedSources.v1", []) : [];
+      if (Array.isArray(stored)) stored.forEach((id) => this.sharedArchiveSources.add(String(id)));
+      if (remember) {
+        this.sharedArchiveSources.add(String(cid));
+        if (typeof GM_setValue === "function") GM_setValue("JavPack.archive.sharedSources.v1", [...this.sharedArchiveSources]);
+      }
+    } catch (_) { /* Session protection remains effective if userscript storage is unavailable. */ }
+    return this.sharedArchiveSources.has(String(cid));
+  }
+  static archiveJunk(file, videos, code) {
+    const name = this.archiveName(file);
+    if (this.archiveHasForeignCode(name, code) || this.archiveSubtitle(file) || /\.(nfo|jpe?g|png|webp)$/i.test(name)) return false;
+    const advert = /广告|廣告|推广|推廣|宣传|宣傳|最新地址|下载地址|下载说明|下载必看|网址|免責|免责|read[ ._-]*me|advert|promotion|website/i;
+    if (this.archiveVideo(file)) {
+      const size = Number(file.s ?? file.size);
+      const mainSizes = videos.map((video) => Number(video.s ?? video.size)).filter((value) => value > 0);
+      return /(?:^|[^a-z])(?:sample|trailer|advert)(?:$|[^a-z])|广告|廣告|预告|預告|试看|試看/i.test(name)
+        && size > 0 && mainSizes.length > 0 && size <= Math.min(64 * 1024 * 1024, Math.min(...mainSizes) * 0.05);
+    }
+    if (this.archiveMatchesCode(name, code)) return false;
+    if (/^(?:thumbs\.db|desktop\.ini|\.ds_store)$/i.test(name)) return true;
+    if (/\.(url|webloc)$/i.test(name)) return true;
+    if (/\.(html?|mhtml?|txt|md|pdf|docx?|rtf)$/i.test(name)) return advert.test(name) || /^(?:index|说明|說明|必看)\./i.test(name);
+    return /\.(zip|rar|7z)$/i.test(name) && advert.test(name) && !/(?:part\d+|\.\d{3})\./i.test(name);
+  }
+  static archiveSourcePlan(scope, tree, videos, files, code, trusted = false) {
+    const keepIds = new Set(files.map((file) => this.archiveId(file.fid)));
+    const entries = [...tree.files, ...[...tree.folders.values()].map((folder) => folder.path.at(-1))];
+    const rootName = this.archiveName(tree.root.path.at(-1));
+    const plan = { scope, tree, videos, files, code, trusted, keepIds, type: "unknown", reason: "源目录无法确认为本片专属目录",
+      candidates: [], attemptedFiles: new Set(), attemptedFolders: new Set(), removedFiles: new Set(), removedFolders: new Set() };
+    if (entries.some((entry) => this.archiveHasForeignCode(this.archiveName(entry), code))) {
+      this.archiveSharedSource(scope.cid, true);
+      return { ...plan, type: "mixed", reason: "源目录包含其他作品，未清理" };
+    }
+    if (this.archiveSharedSource(scope.cid)) return { ...plan, type: "mixed", reason: "源目录已标记为混放目录，未清理" };
+    if (scope.cid === "0" || scope.ids.length < 2 || /^(?:根目录|网盘|115|演员|番号)$/i.test(rootName)
+      || /合集|合辑|混放|作品集|收藏|(?:^|\W)(?:collection|downloads?|actors?|movies)(?:$|\W)/i.test(rootName)) return plan;
+    if (!trusted && !this.archiveMatchesCode(rootName, code)) return plan;
+    const remaining = tree.files.filter((file) => !keepIds.has(this.archiveId(file.fid)));
+    if (remaining.some((file) => !this.archiveJunk(file, videos, code))) return { ...plan, reason: "存在其他版本或归属不明的文件，未清理" };
+    if (!trusted && [...tree.folders].some(([cid, folder]) => cid !== scope.cid
+      && !this.archiveMatchesCode(this.archiveName(folder.path.at(-1)), code)
+      && !/^(?:samples?|trailers?|subs?|subtitles?|字幕|广告|廣告|推广|推廣|说明|說明)$/i.test(this.archiveName(folder.path.at(-1))))) return plan;
+    return { ...plan, type: "single", reason: "已确认本片专属目录", candidates: remaining };
+  }
+  static async archiveReadSource(cid) {
+    const root = await this.archiveDirectory(cid);
+    const scope = { cid: this.archiveId(cid), ids: root.ids, protectedIds: new Set(root.ids.slice(0, -1)) };
+    return { scope, tree: await this.archiveTree(scope) };
+  }
+  static async archiveVerifyFiles(files, cid) {
+    const directory = await this.archiveDirectory(cid);
+    for (const expected of files) {
+      const actual = directory.data.find((file) => this.archiveId(file.fid) === this.archiveId(expected.fid));
+      if (!(Number(expected.s ?? expected.size) > 0) || !actual
+        || this.archiveFileStamp({ ...actual, cid: this.archiveId(cid) }) !== this.archiveFileStamp({ ...expected, cid: this.archiveId(cid) })) {
+        throw this.archiveFailure("归档文件的位置、名称、大小或哈希尚未核实");
+      }
+    }
+    return directory;
+  }
+  static archiveCheckCleanupTree(plan, tree, archivedFiles, targetCid) {
+    const expected = new Map(plan.tree.files.filter((file) => !plan.keepIds.has(file.fid)).map((file) => [file.fid, file]));
+    if (targetCid === plan.scope.cid) archivedFiles.forEach((file) => expected.set(file.fid, file));
+    for (const file of tree.files) {
+      if (!expected.has(file.fid) || this.archiveFileStamp(file) !== this.archiveFileStamp(expected.get(file.fid))) throw this.archiveFailure("源目录内容已变化，未继续清理");
+    }
+    for (const [fid] of expected) {
+      if (!tree.files.some((file) => file.fid === fid)) {
+        if (!plan.attemptedFiles.has(fid)) throw this.archiveFailure("源目录文件已变化，未继续清理");
+        plan.removedFiles.add(fid);
+      }
+    }
+    for (const [cid, folder] of tree.folders) {
+      const original = plan.tree.folders.get(cid);
+      if (!original || folder.ids.join("/") !== original.ids.join("/")) throw this.archiveFailure("源目录结构已变化，未继续清理");
+      const expectedNames = original.path.map((part) => this.archiveId(part.cid ?? part.file_id ?? part.id) === plan.scope.cid && plan.rootName
+        ? plan.rootName : this.archiveName(part));
+      if (folder.path.some((part, index) => this.archiveName(part) !== expectedNames[index])) throw this.archiveFailure("源目录路径已变化，未继续清理");
+    }
+    for (const cid of plan.tree.folders.keys()) {
+      if (!tree.folders.has(cid)) {
+        if (!plan.attemptedFolders.has(cid)) throw this.archiveFailure("源目录结构已变化，未继续清理");
+        plan.removedFolders.add(cid);
+      }
+    }
+  }
+  static archiveAudit(plan, entries) {
+    const record = { at: Date.now(), sourceCid: plan.scope.cid, sourcePath: plan.tree.root.path.map((part) => this.archiveName(part)).join("/"),
+      entries: entries.map((file) => ({ id: this.archiveId(file.fid || file.cid), name: this.archiveName(file), cid: this.archiveId(file.cid) })) };
+    console.info("[115.archive.cleanup]", record);
+    if (typeof GM_getValue === "function" && typeof GM_setValue === "function") {
+      const previous = GM_getValue("JavPack.archive.cleanupLog.v1", []);
+      GM_setValue("JavPack.archive.cleanupLog.v1", [...(Array.isArray(previous) ? previous : []).slice(-49), record]);
+    }
+  }
+  static async archiveCleanSource(plan, { targetCid, archivedFiles, removeRoot = true } = {}) {
+    targetCid = this.archiveId(targetCid);
+    const result = (status, reason) => ({ status, reason, count: plan.removedFiles.size, sourceCid: plan.scope.cid });
+    if (plan.type !== "single") return result("skipped", plan.reason);
+    try {
+      const target = await this.archiveVerifyFiles(archivedFiles, targetCid);
+      if ((removeRoot && (target.ids.includes(plan.scope.cid) || plan.scope.ids.includes(targetCid)))
+        || this.archiveSharedSource(plan.scope.cid)) return result("skipped", "源目录属于受保护范围，未清理");
+      const scan = async () => {
+        await this.archiveVerifyFiles(archivedFiles, targetCid);
+        const tree = await this.archiveTree(plan.scope);
+        this.archiveCheckCleanupTree(plan, tree, archivedFiles, targetCid);
+        return tree;
+      };
+      await scan();
+      const groups = new Map();
+      for (const file of plan.candidates) {
+        if (!plan.removedFiles.has(file.fid)) {
+          if (!groups.has(file.cid)) groups.set(file.cid, []);
+          groups.get(file.cid).push(file);
+        }
+      }
+      for (const [cid, files] of groups) {
+        await scan();
+        this.archiveAudit(plan, files);
+        files.forEach((file) => plan.attemptedFiles.add(file.fid));
+        this.archiveAck(await this.rbDelete(files.map((file) => file.fid), cid), "清理已确认垃圾");
+        const after = await scan();
+        if (files.some((file) => after.files.some((actual) => actual.fid === file.fid))) throw this.archiveFailure("垃圾删除结果尚未确认");
+      }
+      const folders = [...plan.tree.folders].sort((a, b) => b[1].ids.length - a[1].ids.length);
+      for (const [cid, folder] of folders) {
+        if ((!removeRoot && cid === plan.scope.cid) || plan.removedFolders.has(cid)) continue;
+        const tree = await scan();
+        const current = tree.folders.get(cid);
+        if (!current || current.data.length || Number(current.count) !== 0) continue;
+        this.archiveAudit(plan, [{ cid, n: this.archiveName(folder.path.at(-1)) }]);
+        plan.attemptedFolders.add(cid);
+        this.archiveAck(await this.rbDelete([cid], folder.ids.at(-2)), "移除已确认空目录");
+        if (cid === plan.scope.cid) {
+          const parent = await this.archiveDirectory(folder.ids.at(-2));
+          if (parent.data.some((entry) => this.archiveId(entry.cid || entry.fid) === cid)) throw this.archiveFailure("空目录删除结果尚未确认");
+          plan.removedFolders.add(cid);
+          return result("cleaned", "已清理垃圾并移除源目录");
+        }
+        const after = await scan();
+        if (after.folders.has(cid)) throw this.archiveFailure("空子目录删除结果尚未确认");
+      }
+      return result("cleaned", "已清理本片目录中的垃圾");
+    } catch (error) {
+      return result("failed", error?.message || "源目录清理失败");
+    }
   }
   static async archiveDirectory(cid, expectedPath) {
     cid = this.archiveId(cid);
     if (!cid) throw this.archiveFailure("目录 ID 缺失");
     const result = await this.filesAll(cid);
-    if (!result || result.state === false || !Array.isArray(result.data) || !Array.isArray(result.path)) {
+    if (!result || (result.state !== true && result.state !== 1) || !Array.isArray(result.data) || !Array.isArray(result.path)) {
       throw this.archiveFailure("目录内容或路径无法验证");
     }
     const ids = result.path.map((part) => this.archiveId(part.cid ?? part.file_id ?? part.id));
@@ -787,7 +1024,7 @@ const create115SafeArchive = (Base) => class Safe115Archive extends Base {
     if (expectedPath && (ids.length !== expectedPath.length || ids.some((id, index) => id !== expectedPath[index]))) {
       throw this.archiveFailure("目录不在本次隔离范围内");
     }
-    if (result.count != null && (!Number.isFinite(Number(result.count)) || Number(result.count) > result.data.length)) {
+    if (result.count == null || !/^\d+$/.test(String(result.count)) || Number(result.count) !== result.data.length) {
       throw this.archiveFailure("目录列表不完整");
     }
     return { ...result, ids };
@@ -854,9 +1091,8 @@ const create115SafeArchive = (Base) => class Safe115Archive extends Base {
     if (file.n !== name || Number(file.s) !== Number(link[2]) || Number(file.s) <= 0 || !/^[a-f\d]{40}$/.test(sha)) return "";
     return JSON.stringify([file.fid, file.cid, file.n, Number(file.s), sha]);
   }
-  static async verifyArchiveTask(infoHash, scope, { regex }, { max = 41, interval = 3000, filter = () => true } = {}, magnet = {}) {
+  static async verifyArchiveTask(infoHash, scope, { code }, { max = 41, interval = 3000, filter = () => true } = {}, magnet = {}) {
     let hash = typeof infoHash === "string" ? infoHash.trim().toLowerCase() : "";
-    const matcher = new RegExp(regex.source, regex.flags.replace(/[gy]/g, ""));
     const checks = Math.min(120, Math.max(1, Math.floor(Number(max) || 41)));
     const waitMs = Math.min(30000, Math.max(1000, Number(interval) || 3000));
     let completed = false;
@@ -903,7 +1139,7 @@ const create115SafeArchive = (Base) => class Safe115Archive extends Base {
       if (outsideTask) { previousFile = ""; continue; }
       const taskFile = tree.files.find((file) => file.fid === taskId);
       const allVideos = (taskFile ? [taskFile] : tree.files).filter((file) => this.archiveVideo(file));
-      const videos = allVideos.filter((file) => matcher.test(file.n) && filter(file));
+      const videos = allVideos.filter((file) => this.archiveMatchesCode(file.n, code) && !this.archiveHasForeignCode(file.n, code) && filter(file));
       mediaVisible ||= allVideos.length > 0;
       if (Number(task?.status) === 2 && videos.length) return { videos, allVideos, tree, pending: false };
       const readyFile = videos.length ? this.archiveCompletedFile(tree, magnet.url) : "";
@@ -926,13 +1162,16 @@ const create115SafeArchive = (Base) => class Safe115Archive extends Base {
     return files;
   }
   static async finishArchive(scope, verified, options, magnet, onMatch) {
-    const { code, rename, renameTxt, tags = [], clean, cover, isVR, uncensored } = options;
-    const videos = isVR ? verified.allVideos : verified.videos;
-    const srts = verified.tree.files.filter((file) => /^srt$/i.test(file.ico || String(file.n).split(".").at(-1)));
+    const { code, rename, renameTxt, tags = [], clean, cover, uncensored } = options;
+    const videos = verified.videos;
+    const attachments = this.archiveAttachments(verified.tree.files, videos, code);
+    const srts = attachments.filter((file) => this.archiveSubtitle(file));
     const knownIds = new Set([...verified.tree.folders.keys(), ...verified.tree.files.map((file) => file.fid)]);
     const videoIds = videos.map((file) => file.fid);
-    const keepIds = [...new Set([...videoIds, ...srts.map((file) => file.fid)])];
+    const keepIds = [...new Set([...videoIds, ...attachments.map((file) => file.fid)])];
+    const plan = this.archiveSourcePlan(scope, verified.tree, videos, [...videos, ...attachments], code, true);
     let tree = await this.archiveTree(scope);
+    this.archiveCheckCleanupTree(plan, tree, plan.files, scope.cid);
     let files = this.archiveOwned(scope, tree, keepIds, knownIds);
     const moveIds = files.filter((file) => file.cid !== scope.cid).map((file) => file.fid);
     if (moveIds.length) {
@@ -941,16 +1180,7 @@ const create115SafeArchive = (Base) => class Safe115Archive extends Base {
       files = this.archiveOwned(scope, tree, keepIds, knownIds);
       if (files.some((file) => file.cid !== scope.cid)) throw this.archiveFailure("文件移动后位置未确认");
     }
-    if (clean) {
-      // Delete only entries observed inside the freshly created, empty job scope.
-      // Never pass the actor destination, its ancestors, or an arbitrary task CID.
-      const removeIds = tree.root.data.map((item) => this.archiveId(item.fid || item.cid))
-        .filter((id) => !keepIds.includes(id));
-      if (removeIds.some((id) => !id || id === scope.cid || scope.protectedIds.has(id) || !knownIds.has(id))) {
-        throw this.archiveFailure("清理清单包含不属于本次任务的内容");
-      }
-      if (removeIds.length) this.archiveAck(await this.rbDelete(removeIds, scope.cid), "清理本次任务附属文件");
-    }
+    await this.archiveVerifyFiles(files, scope.cid);
     tree = await this.archiveTree(scope);
     files = this.archiveOwned(scope, tree, keepIds, knownIds);
     if (files.some((file) => file.cid !== scope.cid)) throw this.archiveFailure("重命名前文件目录发生变化");
@@ -964,12 +1194,19 @@ const create115SafeArchive = (Base) => class Safe115Archive extends Base {
         rename, renameTxt, zh: magnet.zh || srts.length, crack: magnet.crack, leaked: magnet.leaked,
         uncensored: uncensored || magnet.uncensored,
       });
+      const renamed = this.archiveRenamedFiles(files, videos, names[scope.cid]);
+      renamed.forEach((file) => { names[file.fid] = file.n; });
       if (Object.keys(names).some((id) => scope.protectedIds.has(id) || (id !== scope.cid && !keepIds.includes(id)))) {
         throw this.archiveFailure("重命名清单超出本次任务范围");
       }
       this.archiveAck(await this.filesBatchRename(names), "重命名本次任务");
       syncedVideos = syncedVideos.map((file) => ({ ...file, n: names[file.fid] || file.n }));
     }
+    const archivedFiles = files.map((file) => ({ ...file, n: names[file.fid] || file.n }));
+    plan.rootName = names[scope.cid];
+    await this.archiveVerifyFiles(archivedFiles, scope.cid);
+    const cleanup = clean ? await this.archiveCleanSource(plan, { targetCid: scope.cid, archivedFiles, removeRoot: false })
+      : { status: "skipped", reason: "清理已关闭", count: 0 };
     let hasCover = false;
     let coverError = "";
     if (cover) {
@@ -982,10 +1219,10 @@ const create115SafeArchive = (Base) => class Safe115Archive extends Base {
     }
     const realPath = [...scope.parentNames, names[scope.cid] || scope.name].join("/");
     return {
-      status: "success", msg: code + " 离线任务成功" + (coverError ? "；封面未上传：" + coverError : ""), coverError,
+      status: "success", msg: code + " 离线任务成功；" + cleanup.reason + (coverError ? "；封面未上传：" + coverError : ""), coverError, cleanup,
       match: {
         cid: scope.cid, files: syncedVideos, realPath, hasCover, coverError,
-        subtitleFiles: files.filter((file) => !videoIds.includes(file.fid)).map((file) => ({ ...file, n: names[file.fid] || file.n })),
+        subtitleFiles: archivedFiles.filter((file) => this.archiveSubtitle(file)),
       },
     };
   }

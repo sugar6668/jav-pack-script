@@ -4,12 +4,12 @@
 window.JavPackMatch115Console = class JavPackMatch115Console {
   static zhReg = /中文|中字|字幕|\[[a-z]?hdc[a-z]?\]|[-_\s]+(uc|c|ch|cu|zh)(?![a-z])/i;
 
-  static subtitleFileReg = /\.(srt|ass|ssa|vtt|sub)$/i;
-  static subtitleDetectionVersion = 2;
+  static subtitleFileReg = /\.(srt|ass|ssa|vtt|sub|idx)$/i;
+  static subtitleDetectionVersion = 3;
+  static pendingCleanups = new Map();
   static metadataCache = new Map();
   static metadataPending = new Map();
   static metadataCacheTtl = 5 * 60 * 1000;
-  static archiveAttachmentFileReg = /\.(srt|ass|ssa|vtt|sub|nfo)$/i;
   static crackReg = /破解|解密版|restored|破[\u4E00-\u9FC6]版/i;
   static leakReg = /uncensored[\s._-]*leaked|\buncen\b|無碼流出|流出/i;
 
@@ -140,29 +140,23 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
   }
 
   static hasMatchingDetailCode(video = {}, attachment = {}, details = {}) {
-    const videoName = video.n || video.name || video.file_name || "";
-    const attachmentName = attachment.n || attachment.name || attachment.file_name || "";
-    return Boolean(details.regex?.test(videoName) && details.regex.test(attachmentName));
+    return Boolean(this.archiveSafety()?.archiveAttachmentScore(video, attachment, details.code));
+  }
+
+  static archiveSafety() {
+    const req = window.Req115 || (typeof Req115 !== "undefined" ? Req115 : null);
+    return typeof req?.archiveAttachments === "function" ? req : null;
   }
 
   static belongsToVideoSubtitleFile(video = {}, subtitle = {}, details = {}) {
     const name = subtitle.n || subtitle.name || subtitle.file_name || "";
     if (!this.subtitleFileReg.test(name)) return false;
-    if (this.belongsToVideoSubtitle(video, subtitle)) return true;
-
-    // Historical actor folders often use a different release name for the
-    // subtitle.  Use the current JavDB code only as a narrow fallback.
     return this.hasMatchingDetailCode(video, subtitle, details);
   }
 
   static belongsToArchiveBundle(video = {}, attachment = {}, details = {}) {
     const name = attachment.n || attachment.name || attachment.file_name || "";
-    if (!this.archiveAttachmentFileReg.test(name)) return false;
-    if (this.subtitleFileReg.test(name)) return this.belongsToVideoSubtitleFile(video, attachment, details);
-
-    // NFO files use the same code fallback as subtitles, while other file types
-    // never qualify as archive attachments.
-    return this.belongsToVideoSubtitle(video, attachment) || this.hasMatchingDetailCode(video, attachment, details);
+    return Boolean(name && this.hasMatchingDetailCode(video, attachment, details));
   }
 
   static getArchiveBundleFiles(sourceFiles = [], video = {}, details = {}) {
@@ -187,15 +181,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
   }
 
   static getBundleAttachments(sourceFiles = [], videos = [], details = {}) {
-    const videoFids = new Set(videos.map((file) => String(file.fid)));
-    const files = videos.flatMap((video) => this.getArchiveBundleFiles(sourceFiles, video, details));
-    const seen = new Set(videoFids);
-    return files.filter((file) => {
-      const fid = String(file.fid || "");
-      if (!fid || seen.has(fid)) return false;
-      seen.add(fid);
-      return true;
-    });
+    return (this.archiveSafety()?.archiveAttachments(sourceFiles, videos, details.code) || []).map((file) => this.normalizeFile(file));
   }
 
   static async enrichMetadata(items = [], req115, details = {}) {
@@ -284,7 +270,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
     const lines = [];
     if (mode !== "rename") lines.push(this.formatHoverLine("目录", this.buildArchiveDir(details, mode, sourceFiles).join("/")));
     lines.push(this.formatHoverLine("视频", `${rename}.${normalized.ico}`));
-    if (mode !== "rename") lines.push("同目录字幕会一并移动并按相同规则命名");
+    if (mode !== "rename") lines.push("仅移动完整番号匹配的字幕和附件；确认单片目录后清理垃圾");
     return lines.join("\n");
   }
 
@@ -318,6 +304,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       ? "离线任务正在收尾，请稍后"
       : (file.coverError ? `上次自动上传封面失败：${file.coverError}` : "");
     const safeCoverTitle = this.escapeHtml(coverTitle);
+    const cleanupPending = this.pendingCleanups.get(String(file.fid));
 
     return `
       <div class="zymatch-item" data-fid="${this.escapeHtml(file.fid || "")}" data-cid="${this.escapeHtml(file.cid || "")}" data-vr-bundle="${file.isVrBundle ? "1" : "0"}" data-members="${safeMembers}" data-has-subtitle="${file.hasSubtitle ? "1" : "0"}" data-subtitle-files="${safeSubtitleFiles}" data-offline-finalizing="${offlineFinalizing ? "1" : "0"}">
@@ -343,6 +330,7 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           </div>
           <button class="button is-small is-link x-match-action" title="${safeRenamePreview}" data-action="rename" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}"${mutationDisabled}>重命名</button>
           <button class="button is-small ${coverClass} x-match-action x-match-cover" title="${safeCoverTitle}" data-action="cover" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}" data-n="${this.escapeHtml(file.n)}"${coverDisabled}>${coverText}</button>
+          <button class="button is-small is-warning x-match-action x-match-cleanup" data-action="cleanup" data-fid="${this.escapeHtml(file.fid || "")}" title="${this.escapeHtml(cleanupPending?.reason || "")}"${cleanupPending ? "" : ' style="display:none" hidden'}>重试清理</button>
           <button class="button is-small is-danger is-light x-match-action" data-action="delv" data-cid="${this.escapeHtml(file.cid || "")}" data-fid="${this.escapeHtml(file.fid || "")}"${mutationDisabled}>删除文件</button>
           <button class="button is-small is-danger x-match-action" data-action="delf" data-cid="${this.escapeHtml(file.cid || "")}"${mutationDisabled}>删除文件夹</button>
         </div>
@@ -355,34 +343,79 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
   }
 
   static async archiveMatchedNow({ req115, item, details, dir }) {
+    if (req115.SAFE_ARCHIVE_VERSION !== "2026-10-27.1") throw new Error("请更新 Req115 归档依赖后刷新页面");
     const file = this.normalizeFile(item);
-    const videos = this.getBundleMembers(item);
+    let source;
+    let scanError = "";
+    try { source = await req115.archiveReadSource(file.cid); }
+    catch (error) {
+      // A failed recursive scan never grants cleanup permission. The directly
+      // selected files can still be archived when their own directory is verified.
+      const root = await req115.archiveDirectory(file.cid);
+      const directFiles = root.data.filter((entry) => entry.fid).map((entry) => {
+        if (String(entry.cid ?? entry.pid ?? entry.parent_id ?? file.cid) !== String(file.cid)) throw error;
+        return { ...entry, fid: String(entry.fid), cid: String(file.cid) };
+      });
+      source = { scope: { cid: String(file.cid), ids: root.ids, protectedIds: new Set(root.ids.slice(0, -1)) },
+        tree: { root, folders: new Map([[String(file.cid), root]]), files: directFiles } };
+      scanError = error?.message || "源目录完整扫描未通过";
+    }
+    const { scope, tree } = source;
+    let videos = this.getBundleMembers(item).map((selected) => {
+      const actual = tree.files.find((entry) => String(entry.fid) === String(selected.fid));
+      if (!actual || !req115.archiveVideo(actual) || !req115.archiveMatchesCode(actual.n, details.code)
+        || req115.archiveHasForeignCode(actual.n, details.code)) throw new Error("所选影片的文件归属或完整番号无法确认，已停止归档");
+      return this.normalizeFile(actual);
+    });
+    if (!videos.length) throw new Error("未找到可归档的影片");
+    // Extend an explicitly numbered release only to its identically named parts.
+    // Another resolution or release of the same title remains in the source.
+    if (!item.isVrBundle && videos.length === 1 && req115.archivePart(videos[0].n) != null) {
+      const release = (name) => req115.archiveText(name.replace(/\.[^.]+$/, ""))
+        .replace(/((?:^|[^A-Z0-9])(?:CD|DISC|PART|PT|EP)[\s._-]*)\d+(?=$|[^A-Z0-9])/, "$1#")
+        .replace(/\.\d{2}$/, ".#");
+      videos = tree.files.filter((entry) => entry.cid === videos[0].cid && req115.archiveVideo(entry)
+        && req115.archiveMatchesCode(entry.n, details.code) && !req115.archiveHasForeignCode(entry.n, details.code)
+        && req115.archivePart(entry.n) != null && release(entry.n) === release(videos[0].n)).map((entry) => this.normalizeFile(entry));
+    }
+    const files = [...videos, ...req115.archiveAttachments(tree.files, videos, details.code).map((entry) => this.normalizeFile(entry))];
+    const plan = req115.archiveSourcePlan(scope, tree, videos, files, details.code);
+    if (scanError) { plan.type = "unknown"; plan.reason = "源目录扫描不完整，未清理"; }
     const targetDir = (dir?.length ? dir : this.buildArchiveDir(details, "code", videos)).map((part) => this.sanitizeName(part)).filter(Boolean);
-    const targetCid = await req115.handleDir(targetDir);
+    const targetCid = String(await req115.handleDir(targetDir) || "");
     if (!targetCid) throw new Error("目标目录创建失败");
-
-    const { data: sourceFiles = [] } = await req115.filesAll(file.cid);
-    // Prefer the selected video's basename.  When an old actor directory uses
-    // different release names, allow only subtitle/NFO attachments whose
-    // filename still matches the current JavDB code.
-    const files = [...videos, ...this.getBundleAttachments(sourceFiles, videos, details)];
+    const target = await req115.archiveDirectory(targetCid);
+    const targetNames = target.path.map((part) => req115.archiveName(part));
+    if (targetNames.slice(-targetDir.length).join("/") !== targetDir.join("/")
+      || target.data.some((entry) => req115.archiveHasForeignCode(req115.archiveName(entry), details.code))) {
+      throw new Error("目标目录路径或作品归属无法确认，已停止归档");
+    }
+    if (scanError) await req115.archiveVerifyFiles(files, scope.cid);
+    else req115.archiveCheckCleanupTree(plan, await req115.archiveTree(scope), files, scope.cid);
 
     if (String(file.cid) !== String(targetCid)) {
       const moveRes = await req115.filesMove(files.map((it) => it.fid), targetCid);
-      if (!moveRes || moveRes.state === false) throw this.requestError("文件移动失败", moveRes);
+      req115.archiveAck(moveRes, "移动影片及匹配附件");
+    }
+    let archivedFiles = files.map((entry) => ({ ...entry, cid: targetCid }));
+    await req115.archiveVerifyFiles(archivedFiles, targetCid);
+    const rename = this.buildRename(details, files);
+    const renamedFiles = req115.archiveRenamedFiles(archivedFiles, videos, rename);
+    let archiveError = "";
+    try {
+      const names = Object.fromEntries(renamedFiles.map((entry) => [entry.fid, entry.n]));
+      req115.archiveAck(await req115.filesBatchRename({ ...names, [targetCid]: rename }), "重命名归档文件");
+      await req115.archiveVerifyFiles(renamedFiles, targetCid);
+      archivedFiles = renamedFiles;
+    } catch (error) {
+      archiveError = error?.message || "重命名结果未确认";
+      const current = await req115.archiveDirectory(targetCid);
+      archivedFiles = archivedFiles.map((expected) => ({ ...expected,
+        n: current.data.find((entry) => String(entry.fid) === String(expected.fid))?.n || expected.n }));
     }
 
-    const rename = this.buildRename(details, files);
-    const renamedFiles = this.buildRenamedFiles(files, rename);
-    await req115.handleRename(files, targetCid, {
-      rename,
-      renameTxt: { zh: " [中文]", crack: "", no: ".${no}", sep: "-" },
-      zh: false,
-      crack: false,
-    });
-
     // 仅把“*.cover.图片扩展名”视为已存在的封面；目标目录已有该封面时不再上传，避免重复封面文件。
-    const targetRes = await req115.files(targetCid, { limit: 1150 }).catch(() => ({ data: [], path: [] }));
+    const targetRes = await req115.archiveDirectory(targetCid);
     const targetFiles = targetRes?.data || [];
     const targetPath = this.formatPathParts(targetRes?.path || []) || ["根目录", ...targetDir].join("/");
     let coverError = "";
@@ -399,18 +432,11 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       }
     }
 
-    // Only remove the original directory after every selected file has been
-    // moved and the destination work has completed.  A matched item may come
-    // from a collection folder, so delete it only when the 115 listing
-    // explicitly reports that no entries remain.
-    if (String(file.cid) !== String(targetCid)) {
-      const sourceRes = await req115.files(file.cid, { limit: 1 });
-      const sourceCount = Number(sourceRes?.count);
-      if (Number.isFinite(sourceCount) && sourceCount === 0) {
-        const deleteRes = await req115.rbDelete([file.cid]);
-        if (!deleteRes || deleteRes.state === false) throw this.requestError("源文件夹清理失败", deleteRes);
-      }
-    }
+    const cleanupArgs = { targetCid, archivedFiles };
+    const cleanup = archiveError ? { status: "skipped", reason: "重命名未确认，源目录未清理", count: 0 }
+      : await req115.archiveCleanSource(plan, cleanupArgs);
+    if (cleanup.status === "failed") this.pendingCleanups.set(String(item.fid), { req115, plan, args: cleanupArgs, reason: cleanup.reason });
+    else this.pendingCleanups.delete(String(item.fid));
 
     // The destination listing is already available from the archive flow.
     // Keep an exact delta on the item so Quick View can update the parent card
@@ -419,16 +445,25 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
       sourceCid: file.cid,
       cid: targetCid,
       realPath: targetPath,
-      // The move/rename result is known locally.  Do not wait for the listing
-      // index to catch up before synchronizing the small window and its card.
-      files: renamedFiles,
+      files: archivedFiles,
       hasCover,
+      coverError,
+      cleanup,
+      archiveError,
     };
 
-    // Preserve the long-standing string result for a normal successful archive.
-    // A cover error (and the existing VR path) carries the additional state so
-    // the caller can show a retryable warning without losing the new location.
-    return item.isVrBundle || coverError ? { cid: targetCid, coverError } : targetCid;
+    return { cid: targetCid, coverError, archiveError, cleanup };
+  }
+
+  static retryCleanup(fid, queueOptions) {
+    const pending = this.pendingCleanups.get(String(fid));
+    if (!pending) throw new Error("没有可续做的清理记录，请重新核对源目录");
+    return pending.req115.queueMutation("重试清理", async () => {
+      const cleanup = await pending.req115.archiveCleanSource(pending.plan, pending.args);
+      pending.reason = cleanup.reason;
+      if (cleanup.status !== "failed") this.pendingCleanups.delete(String(fid));
+      return cleanup;
+    }, queueOptions);
   }
 
   static uploadCover({ req115, queueOptions, ...args }) {
@@ -584,6 +619,15 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           const newCid = archiveResult?.cid || archiveResult;
           item.cid = newCid;
           const itemDom = btn.closest(".zymatch-item");
+          const movedVideos = item.archiveSync?.files?.filter((entry) => req115.archiveVideo(entry)) || [];
+          item.members = movedVideos;
+          if (itemDom && movedVideos.length) itemDom.dataset.members = JSON.stringify(movedVideos);
+          const cleanupBtn = itemDom?.querySelector(".x-match-cleanup");
+          if (cleanupBtn) {
+            cleanupBtn.hidden = archiveResult.cleanup?.status !== "failed";
+            cleanupBtn.style.display = cleanupBtn.hidden ? "none" : "";
+            cleanupBtn.title = archiveResult.cleanup?.reason || "";
+          }
           itemDom?.querySelectorAll("[data-cid]").forEach((node) => {
             node.dataset.cid = String(newCid);
           });
@@ -611,6 +655,14 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
           }
           const cache = options.updateCache?.("archive", item, item.archiveSync);
           options.syncCache?.("archive", cache);
+        } else if (action === "cleanup") {
+          const cleanup = await this.retryCleanup(item.fid, queueOptions);
+          btn.title = cleanup.reason;
+          btn.textContent = cleanup.status === "failed" ? "重试清理" : "清理完成";
+          btn.hidden = cleanup.status !== "failed";
+          btn.style.display = btn.hidden ? "none" : "";
+          grant?.notify?.({ status: cleanup.status === "failed" ? "warn" : "success", icon: cleanup.status === "failed" ? "warning" : "success", msg: cleanup.reason });
+          return;
         } else if (action === "rename") {
           const { file, rename } = await this.renameMatched({ req115, item, details, queueOptions });
           const itemDom = btn.closest(".zymatch-item");
@@ -656,9 +708,10 @@ window.JavPackMatch115Console = class JavPackMatch115Console {
         }
 
         const archiveCoverError = action === "archive" ? archiveResult?.coverError : "";
-        grant?.notify?.(archiveCoverError
-          ? { status: "warn", icon: "warning", msg: `已归档，封面未上传：${archiveCoverError}` }
-          : { status: "success", icon: "success", msg: "操作成功" });
+        const archiveWarning = archiveCoverError || archiveResult?.archiveError || archiveResult?.cleanup?.status === "failed";
+        const archiveMessage = action === "archive" ? ["已归档", archiveResult?.cleanup?.reason,
+          archiveResult?.archiveError, archiveCoverError && `封面未上传：${archiveCoverError}`].filter(Boolean).join("；") : "操作成功";
+        grant?.notify?.({ status: archiveWarning ? "warn" : "success", icon: archiveWarning ? "warning" : "success", msg: archiveMessage });
         if (action === "delv" || action === "delf") {
           btn.textContent = "已删除";
           btn.setAttribute("disabled", "");

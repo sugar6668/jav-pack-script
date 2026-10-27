@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            JavDB.match115
 // @namespace       JavDB.match115@blc
-// @version         0.0.45
+// @version         0.0.46
 // @author          blc
 // @description     115 网盘匹配
 // @match           https://javdb.com/*
@@ -9,8 +9,8 @@
 // @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Grant.lib.js
 // @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Magnet.lib.js
 // @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Req.lib.js
-// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Req115.lib.js
-// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Match115Console.lib.js
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Req115.lib.js?v=20261027.1
+// @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Match115Console.lib.js?v=20261027.1
 // @require         https://raw.githubusercontent.com/sugar6668/jav-pack-script/refs/heads/main/libs/JavPack.Util.lib.js
 // @connect         115.com
 // @connect         aliyuncs.com
@@ -657,6 +657,12 @@ const getPageDetails = (dom = document) => {
         // `s` is the human-readable display size (for example, 5.09GB).
         // 115 returns its file size as raw bytes here, which belongs in `bytes`.
         if (target?.s !== undefined) updated.bytes = Number(target.s) || updated.bytes;
+        updated.coverError = String(changes.coverError || "");
+        updated.subtitleFiles = (changes.files || [])
+          .filter((file) => window.JavPackMatch115Console?.belongsToVideoSubtitleFile(target || updated, file, codeDetails))
+          .map((file) => ({ n: file.n, s: file.s }));
+        updated.hasSubtitle = updated.subtitleFiles.length > 0;
+        updated.subtitleDetectionVersion = window.JavPackMatch115Console?.subtitleDetectionVersion;
       } else if (operation === "rename" && String(source.fid) === String(item.fid)) {
         const ext = changes.file?.ico || source.ico;
         if (changes.rename && ext) updated.n = `${changes.rename}.${ext}`;
@@ -1204,7 +1210,7 @@ const getPageDetails = (dom = document) => {
         if (keep.length) wait[searchKey] = keep;
         else delete wait[searchKey];
       });
-      probeQueues.forEach((queue) => {
+      Object.values(probeQueues).forEach((queue) => {
         for (let index = queue.length - 1; index >= 0; index--) {
           const job = queue[index];
           if ((wait[job.searchKey] || []).length) continue;
